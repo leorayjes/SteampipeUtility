@@ -1,49 +1,47 @@
 import boto3
 import os
+import logging
 
 organizations_client = boto3.client('organizations')
 sts_client = boto3.client('sts')
 ssm_client = boto3.client('ssm')
 
 role_name = ""
-external_id = ssm_client.get_parameter_by_path(
-    Name="/steampipe/role/external_id",
-    WithDecryption=True 
-)['Parameter']['Value']
+# external_id = ssm_client.get_parameter_by_path(
+#     Name="/steampipe/role/external_id",
+#     WithDecryption=True 
+# )['Parameter']['Value']
+external_id = ""
 accounts = organizations_client.list_accounts()['Accounts']
 
 def get_current_context(sts_client):
     print(sts_client.get_caller_identity())
 
-def generate_profiles(accounts):
+def generate_profiles(accounts, role_name, external_id):
     profile_template = """
-[aws_{account_name}]
-role_arn = arn:aws:iam::{account_id}:role/{role_name}
+[{profile_name}]
+role_arn = {role_arn}
 source_profile = default
 external_id = {external_id}
 """ 
-#     cli_user = """
-# [cli_user]
-# aws_access_key_id = ""
-# aws_secret_access_key = ""
-# """
-    # profiles += cli_user + "\n"
+    profiles = ""
     for account in accounts:
+        account_id = account["Id"]
         profile_block = profile_template.format(
-            account_name=account["name"],
-            account_id=account["id"],
-            role_name=role_name,
+            profile_name=f"aws_{account_id}",
+            role_arn=f"arn:aws:iam::{account_id}:role/{role_name}",
+            source_profile="default",
             external_id=external_id
         )
-        profiles += profile_block + "\n"
+        profiles += "\n" + profile_block
     
     return profiles.strip()
 
 def generate_connections(accounts, regions):
     connection_template = """
-connection "aws_{account_name}" {{
+connection "{connection_name}" {{
   plugin  = "aws"
-  profile = "aws_{account_name}"
+  profile = {profile}
   regions = {regions}
 }}
 """
@@ -51,14 +49,17 @@ connection "aws_{account_name}" {{
 connection "aws_all" {{
   plugin  = "aws"
   profile = "aws_*"
-  regions = {regions}
+  regions = "*"
 }}
 """
-    connections += aggregate_connection + "\n"
+    connections = ""
+    connections += "\n" + aggregate_connection
     for account in accounts:
+        account_id = account["Id"]
         connection_block = connection_template.format(
-            account_name=account["name"],
-            profile=account["profile"],
+            connection_name=f"aws_{account_id}",
+            plugin="aws",
+            profile=f"aws_{account_id}",
             regions=str(regions).replace("'", '"')
         )
         connections += connection_block + "\n"
@@ -68,20 +69,18 @@ connection "aws_all" {{
 regions = ["*"]
 
 connections_result = generate_connections(accounts, regions)
-profiles_result = generate_profiles(accounts)
+profiles_result = generate_profiles(accounts, role_name, external_id)
 
 aws_credentials_file_path = os.path.expanduser("~/.aws/credentials")
-steampipe_credentials_file_path = os.path.expanduser("~/.steampipe/config/aws.spc")
-
+# steampipe_credentials_file_path = os.path.expanduser("~/.steampipe/config/aws.spc")
+steampipe_credentials_file_path = os.path.expanduser("//wsl.localhost/Ubuntu/home/jesse/.steampipe/config/aws.spc")
 # Write the configuration content to the AWS credentials file
-with open(aws_credentials_file_path, 'w') as credentials_file:
+with open(aws_credentials_file_path, 'a') as credentials_file:
     credentials_file.write(profiles_result)
 
 # Write the configuration content to the Steampipe credentials file
-with open(steampipe_credentials_file_path, 'w') as credentials_file:
-    credentials_file.write(connections_result)
+with open(steampipe_credentials_file_path, 'a') as steampipe_credentials_file:
+    steampipe_credentials_file.write(connections_result)
 
 print(f"Configuration written to {aws_credentials_file_path}")
 print(f"Configuration written to {steampipe_credentials_file_path}")
-print(f"Connections: \n {connections_result}")
-print(f"Profiles: \n {profiles_result}")
