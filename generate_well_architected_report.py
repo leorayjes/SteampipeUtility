@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-generate_report.py
+generate_well_architected_report.py
 
 Generates a self-contained, filterable HTML report from a
 Powerpipe AWS Well-Architected JSON benchmark result file.
 
 Usage:
-    python generate_report.py <path-to-result.json> [--output report.html]
+    python generate_well_architected_report.py <path-to-result.json> [--output report.html]
 """
 
 import argparse
