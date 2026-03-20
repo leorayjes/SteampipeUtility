@@ -87,18 +87,12 @@ cleanup() {
         log "Connections file cleared: $spc_path"
     fi
 
-    read -rp "Remove the virtual environment ($VENV_DIR) before exiting? [y/N]: " confirm
-    case "$confirm" in
-        [yY][eE][sS]|[yY])
-            log "Removing virtual environment..."
-            deactivate 2>/dev/null || true
-            rm -rf "$VENV_DIR"
-            log "Virtual environment removed."
-            ;;
-        *)
-            log "Virtual environment kept at $VENV_DIR."
-            ;;
-    esac
+    # Always remove the virtual environment on exit.
+    deactivate 2>/dev/null || true
+    if [[ -d "$VENV_DIR" ]]; then
+        rm -rf "$VENV_DIR"
+        log "Virtual environment removed."
+    fi
 
     log "Exiting."
 }
