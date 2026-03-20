@@ -31,6 +31,85 @@ warn()     { echo "[WARN]  $*"; }
 err()      { echo "[ERROR] $*" >&2; }
 section()  { echo; echo "===================================================="; echo "  $*"; echo "===================================================="; echo; }
 
+# ---------------------------------------------------------------------------
+# Python 3 installation check
+# ---------------------------------------------------------------------------
+
+ensure_python3() {
+    local min_minor=11
+    local py_cmd=""
+
+    # Find a usable python3 binary.
+    if command -v python3 &>/dev/null; then
+        py_cmd="python3"
+    elif command -v python &>/dev/null && python --version 2>&1 | grep -q "^Python 3"; then
+        py_cmd="python"
+    fi
+
+    if [[ -n "$py_cmd" ]]; then
+        local minor
+        minor=$("$py_cmd" -c "import sys; print(sys.version_info.minor)")
+        local major
+        major=$("$py_cmd" -c "import sys; print(sys.version_info.major)")
+
+        if (( major >= 3 && minor >= min_minor )); then
+            log "Python $major.$minor found — OK."
+            return
+        fi
+
+        warn "Python $major.$minor found but 3.${min_minor}+ is required. Attempting upgrade..."
+    else
+        log "Python 3 not found. Attempting installation..."
+    fi
+
+    # Install based on OS.
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        if ! command -v brew &>/dev/null; then
+            err "Homebrew is required to install Python on macOS but was not found."
+            err "Install Homebrew from https://brew.sh then re-run this script."
+            exit 1
+        fi
+        brew install python3
+    elif command -v apt-get &>/dev/null; then
+        log "Installing python3 via apt-get..."
+        sudo apt-get update -qq
+        sudo apt-get install -y python3 python3-venv python3-pip
+
+        # On Ubuntu < 22.04, python3 may still be < 3.11. Try deadsnakes PPA.
+        local minor_after
+        minor_after=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "0")
+        if (( minor_after < min_minor )); then
+            log "Installed version still below 3.${min_minor}. Trying deadsnakes PPA..."
+            sudo apt-get install -y software-properties-common
+            sudo add-apt-repository -y ppa:deadsnakes/ppa
+            sudo apt-get update -qq
+            sudo apt-get install -y python3.11 python3.11-venv python3.11-distutils
+            # Point python3 at 3.11 for this session.
+            export PATH="/usr/bin:$PATH"
+            if command -v python3.11 &>/dev/null; then
+                alias python3=python3.11
+            fi
+        fi
+    else
+        err "Cannot install Python automatically on this system."
+        err "Please install Python 3.${min_minor}+ manually and re-run this script."
+        err "See https://www.python.org/downloads/"
+        exit 1
+    fi
+
+    # Final version check.
+    if ! command -v python3 &>/dev/null; then
+        err "Python 3 installation failed. Please install Python 3.${min_minor}+ manually."
+        exit 1
+    fi
+
+    local final_minor
+    final_minor=$(python3 -c "import sys; print(sys.version_info.minor)")
+    local final_major
+    final_major=$(python3 -c "import sys; print(sys.version_info.major)")
+    log "Python ${final_major}.${final_minor} ready."
+}
+
 prompt_required() {
     local var_name="$1"
     local prompt_text="$2"
@@ -104,6 +183,8 @@ trap cleanup EXIT
 # ---------------------------------------------------------------------------
 
 section "Python Environment"
+
+ensure_python3
 
 if [[ -d "$VENV_DIR" ]]; then
     log "Existing virtual environment found at $VENV_DIR — reusing."
