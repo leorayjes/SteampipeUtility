@@ -94,9 +94,16 @@
       "description": "Public exposure and network perimeter checks",
       "mod": "github.com/turbot/steampipe-mod-aws-perimeter",
       "benchmarks": [
-        { "id": "public_access",  "name": "Public Access" },
-        { "id": "network_access", "name": "Network Access" },
-        { "id": "shared_access",  "name": "Shared Access" }
+        { "id": "public_access",                "name": "Public Access (All)" },
+        { "id": "public_access_settings",       "name": "  ↳ Public Access Settings" },
+        { "id": "public_ips",                   "name": "  ↳ Public IPs" },
+        { "id": "resource_policy_public_access","name": "  ↳ Resource Policy Public Access" },
+        { "id": "network_access",               "name": "Network Access (All)" },
+        { "id": "network_general_access",       "name": "  ↳ Network General Access" },
+        { "id": "security_group_access",        "name": "  ↳ Security Group Access" },
+        { "id": "shared_access",                "name": "Shared Access (All)" },
+        { "id": "shared_access_settings",       "name": "  ↳ Shared Access Settings" },
+        { "id": "ram_shared_access",            "name": "  ↳ RAM Shared Access" }
       ],
       "supports_html": true,
       "supports_json": true,
