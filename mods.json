@@ -71,7 +71,17 @@
       "description": "High-signal focused set of critical security findings",
       "mod": "github.com/turbot/steampipe-mod-aws-top-10",
       "benchmarks": [
-        { "id": "account_security", "name": "Account Security (Top 10)" }
+        { "id": "account_security",                                  "name": "Account Security (All Top 10)" },
+        { "id": "account_security_accurate_account_info",            "name": "1. Accurate account information" },
+        { "id": "account_security_use_mfa",                          "name": "2. Use multi-factor authentication (MFA)" },
+        { "id": "account_security_no_hardcoded_secrets",             "name": "3. No hard-coding secrets" },
+        { "id": "account_security_limit_security_groups",            "name": "4. Limit security groups" },
+        { "id": "account_security_intentional_data_policies",        "name": "5. Intentional data policies" },
+        { "id": "account_security_centralize_cloudtrail_logs",       "name": "6. Centralize CloudTrail logs" },
+        { "id": "account_security_validate_iam_roles",               "name": "7. Validate IAM roles" },
+        { "id": "account_security_take_action_on_findings",          "name": "8. Take action on findings" },
+        { "id": "account_security_rotate_keys",                      "name": "9. Rotate keys" },
+        { "id": "account_security_dev_cycle",                        "name": "10. Be involved in the dev cycle" }
       ],
       "supports_html": true,
       "supports_json": true,
