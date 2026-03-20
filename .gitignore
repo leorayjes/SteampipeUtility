@@ -164,6 +164,8 @@ cython_debug/
 # Audit results — keep the directory but not run folders or output files
 results/*/
 !results/.gitkeep
+reports/*
+!reports/.gitkeep
 
 # Mac specific files
 .DS_Store

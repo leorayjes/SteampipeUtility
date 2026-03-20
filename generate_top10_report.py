@@ -765,7 +765,7 @@ def main() -> None:
     output_path = (
         Path(args.output).resolve()
         if args.output
-        else Path(__file__).parent / "results" / (input_path.stem + "_report.html")
+        else Path(__file__).parent / "reports" / "aws_top10.html"
     )
 
     LOGGER.info("Reading %s...", input_path.name)

@@ -722,7 +722,7 @@ def main() -> None:
     if args.output:
         output_path = Path(args.output).resolve()
     else:
-        output_path = Path(__file__).parent / "results" / (input_path.stem + "_report.html")
+        output_path = Path(__file__).parent / "reports" / "aws_well_architected.html"
 
     print(f"[INFO]  Reading {input_path.name}...")
     with open(input_path, encoding="utf-8") as f:
