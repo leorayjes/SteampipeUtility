@@ -99,6 +99,17 @@ the default value prompted by the tool at runtime.
 
 ### 2. Python 3.11+
 
+Python 3.11 or higher is required. The tool will attempt to install
+it automatically if it is missing or below the minimum version:
+
+- **macOS** — via Homebrew (`brew install python3`)
+- **Linux/WSL** — via `apt-get`; falls back to the `deadsnakes` PPA
+  on older Ubuntu releases
+- **Other Linux distros** — exits with a clear message and a link to
+  `python.org/downloads`
+
+To check your current version:
+
 ```bash
 python3 --version
 ```
@@ -144,10 +155,11 @@ export AWS_SESSION_TOKEN=...
 
 On first run the script will:
 
-1. Create a Python virtual environment (`.venv`)
-2. Install `boto3`
-3. Install / update Steampipe, Powerpipe, and the AWS plugin
-4. Prompt for runtime parameters
+1. Check for Python 3.11+ and install it if missing or outdated
+2. Create a Python virtual environment (`.venv`)
+3. Install `boto3`
+4. Install / update Steampipe, Powerpipe, and the AWS plugin
+5. Prompt for runtime parameters
 
 ---
 
@@ -320,18 +332,12 @@ To add a new mod:
 
 ---
 
-## Branches
-
-| Branch | Description |
-|---|---|
-| `main` | Bash CLI — plain prompts, no extra UI dependencies |
-| `feature/tui` | Rich/Questionary TUI — styled prompts, spinners, panels |
-| `feature/gui-textual` | Textual GUI — mouse-driven full-screen terminal app |
-| `feature/gui-web` | Flask web GUI — browser UI with live log streaming |
-
----
-
 ## Troubleshooting
+
+**Python not found or below 3.11**
+The script will attempt to install Python automatically. If it cannot
+(non-apt Linux), it will exit with instructions and a link to
+`https://www.python.org/downloads/`.
 
 **`steampipe` or `powerpipe` not found after install (Linux/WSL)**
 ```bash
