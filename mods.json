@@ -1,0 +1,49 @@
+{
+  "steampipe": {
+    "plugins": [
+      "aws"
+    ]
+  },
+  "mods": [
+    {
+      "id": "aws_compliance",
+      "name": "AWS Compliance",
+      "description": "CIS, PCI DSS, NIST, SOC 2, HIPAA and more",
+      "mod": "github.com/turbot/steampipe-mod-aws-compliance",
+      "benchmark": "aws_compliance.benchmark.all_controls",
+      "supports_html": true,
+      "supports_json": true,
+      "supports_dashboard": true
+    },
+    {
+      "id": "aws_well_architected",
+      "name": "AWS Well-Architected",
+      "description": "AWS Well-Architected Framework checks across all pillars",
+      "mod": "github.com/turbot/steampipe-mod-aws-well-architected",
+      "benchmark": "aws_well_architected.benchmark.well_architected_framework",
+      "supports_html": true,
+      "supports_json": true,
+      "supports_dashboard": true
+    },
+    {
+      "id": "aws_top10",
+      "name": "AWS Top 10 Security Checks",
+      "description": "High-signal focused set of critical security findings",
+      "mod": "github.com/turbot/steampipe-mod-aws-top-10",
+      "benchmark": "aws_top_10.benchmark.account_security",
+      "supports_html": true,
+      "supports_json": true,
+      "supports_dashboard": true
+    },
+    {
+      "id": "aws_perimeter",
+      "name": "AWS Perimeter",
+      "description": "Public exposure and network perimeter checks",
+      "mod": "github.com/turbot/steampipe-mod-aws-perimeter",
+      "benchmark": "aws_perimeter.benchmark.public_access",
+      "supports_html": true,
+      "supports_json": true,
+      "supports_dashboard": true
+    }
+  ]
+}
