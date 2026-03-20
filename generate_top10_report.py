@@ -1,19 +1,31 @@
 #!/usr/bin/env python3
 """
-generate_well_architected_report.py
+generate_top10_report.py
 
 Generates a self-contained, filterable HTML report from a
-Powerpipe AWS Well-Architected JSON benchmark result file.
+Powerpipe AWS Top 10 Security Checks JSON benchmark result file.
 
 Usage:
-    python generate_well_architected_report.py <path-to-result.json> [--output report.html]
+    python generate_top10_report.py <path-to-result.json> [--output report.html]
 """
 
 import argparse
 import json
+import logging
 import sys
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+logging.basicConfig(
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+    level=logging.INFO,
+)
+LOGGER = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -21,7 +33,7 @@ from datetime import datetime
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate a styled HTML report from a Well-Architected benchmark JSON."
+        description="Generate a styled HTML report from an AWS Top 10 Security Checks benchmark JSON."
     )
     parser.add_argument("input", help="Path to the benchmark result JSON file.")
     parser.add_argument(
@@ -38,59 +50,36 @@ def parse_args() -> argparse.Namespace:
 
 STATUS_ORDER = ["alarm", "error", "ok", "info", "skip"]
 
-# Canonical display names for Well-Architected pillar IDs.
-PILLAR_NAMES = {
-    "operationalExcellence": "Operational Excellence",
-    "reliability":           "Reliability",
-    "security":              "Security",
-    "performance":           "Performance Efficiency",
-    "costOptimization":      "Cost Optimization",
-    "sustainability":        "Sustainability",
-}
+# Canonical check titles keyed by their position prefix for stable ordering.
+CHECK_ORDER = [
+    "1.", "2.", "3.", "4.", "5.",
+    "6.", "7.", "8.", "9.", "10.",
+]
 
-def extract_controls(node, pillar="", question="", best_practice="", controls=None):
-    """Recursively walk the group tree and collect all controls into a flat list."""
-    if controls is None:
-        controls = []
 
-    depth = node.get("_depth", 0)
-    title = node.get("title", "")
-    tags  = node.get("tags", {}) or {}
+def extract_checks(data: dict) -> list[dict]:
+    """
+    Return the 10 top-level check groups from the benchmark, each containing
+    their summary and flattened controls list.
+    """
+    try:
+        checks_raw = data["groups"][0]["groups"]
+    except (KeyError, IndexError):
+        LOGGER.warning("Could not locate top-level check groups in JSON.")
+        return []
 
-    # Use pillar_id tag to identify the pillar level unambiguously.
-    # pillar_id appears on both pillar groups and question groups, so we
-    # only update the pillar label when we first encounter it (depth 2).
-    pillar_id = tags.get("pillar_id", "")
-    if pillar_id and depth == 2:
-        pillar = PILLAR_NAMES.get(pillar_id, title)
-    elif depth == 3:
-        question = title
-    elif depth == 4:
-        best_practice = title
+    checks = []
+    for check in checks_raw:
+        summary = check.get("summary", {}).get("status", {})
+        total   = sum(summary.get(s, 0) for s in STATUS_ORDER)
+        ok      = summary.get("ok", 0)
+        alarm   = summary.get("alarm", 0)
+        error   = summary.get("error", 0)
+        info    = summary.get("info", 0)
+        skip    = summary.get("skip", 0)
+        pass_pct = round((ok / total) * 100) if total > 0 else None
 
-    for group in (node.get("groups") or []):
-        group["_depth"] = depth + 1
-        extract_controls(group, pillar, question, best_practice, controls)
-
-    for ctrl in (node.get("controls") or []):
-        summary = ctrl.get("summary") or {}
-        results = ctrl.get("results") or []
-        service = (ctrl.get("tags") or {}).get("service", "Unknown")
-        severity = ctrl.get("severity") or ""
-
-        total = sum(summary.get(s, 0) for s in STATUS_ORDER)
-        alarm = summary.get("alarm", 0)
-        ok    = summary.get("ok", 0)
-        error = summary.get("error", 0)
-        info  = summary.get("info", 0)
-        skip  = summary.get("skip", 0)
-
-        if total > 0:
-            pass_pct = round((ok / total) * 100)
-        else:
-            pass_pct = None
-
-        # Determine overall status for the control
+        # Determine overall status for the check group
         if error > 0:
             status = "error"
         elif alarm > 0:
@@ -102,47 +91,93 @@ def extract_controls(node, pillar="", question="", best_practice="", controls=No
         else:
             status = "skip"
 
-        controls.append({
-            "id":           ctrl.get("control_id", ""),
-            "title":        ctrl.get("title", ""),
-            "description":  ctrl.get("description", ""),
-            "pillar":       pillar,
-            "question":     question,
-            "best_practice":best_practice,
-            "service":      service,
-            "severity":     severity,
-            "status":       status,
-            "alarm":        alarm,
-            "ok":           ok,
-            "error":        error,
-            "info":         info,
-            "skip":         skip,
-            "total":        total,
-            "pass_pct":     pass_pct,
-            "results":      results,
-            "account_ids":  sorted(set(
-                d["value"]
-                for r in results
-                for d in (r.get("dimensions") or [])
-                if d.get("key") == "account_id" and d.get("value")
-            )),
-            "regions":      sorted(set(
-                d["value"]
-                for r in results
-                for d in (r.get("dimensions") or [])
-                if d.get("key") == "region" and d.get("value")
-            )),
+        controls = extract_controls(check, check["title"])
+        checks.append({
+            "title":    check.get("title", ""),
+            "description": check.get("description", ""),
+            "status":   status,
+            "alarm":    alarm,
+            "ok":       ok,
+            "error":    error,
+            "info":     info,
+            "skip":     skip,
+            "total":    total,
+            "pass_pct": pass_pct,
+            "controls": controls,
         })
 
+    return checks
+
+
+def extract_controls(node: dict, check_title: str, controls: list | None = None) -> list[dict]:
+    """Recursively collect all controls under a check group into a flat list."""
+    if controls is None:
+        controls = []
+
+    for ctrl in (node.get("controls") or []):
+        summary  = ctrl.get("summary") or {}
+        results  = ctrl.get("results") or []
+        service  = (ctrl.get("tags") or {}).get("service", "Unknown")
+        severity = ctrl.get("severity") or ""
+
+        total = sum(summary.get(s, 0) for s in STATUS_ORDER)
+        alarm = summary.get("alarm", 0)
+        ok    = summary.get("ok", 0)
+        error = summary.get("error", 0)
+        info  = summary.get("info", 0)
+        skip  = summary.get("skip", 0)
+
+        pass_pct = round((ok / total) * 100) if total > 0 else None
+
+        if error > 0:
+            status = "error"
+        elif alarm > 0:
+            status = "alarm"
+        elif ok > 0:
+            status = "ok"
+        elif info > 0:
+            status = "info"
+        else:
+            status = "skip"
+
+        account_ids = sorted(set(
+            d["value"]
+            for r in results
+            for d in (r.get("dimensions") or [])
+            if d.get("key") == "account_id" and d.get("value")
+        ))
+
+        regions = sorted(set(
+            d["value"]
+            for r in results
+            for d in (r.get("dimensions") or [])
+            if d.get("key") == "region" and d.get("value")
+        ))
+
+        controls.append({
+            "id":          ctrl.get("control_id", ""),
+            "title":       ctrl.get("title", ""),
+            "description": ctrl.get("description", ""),
+            "check":       check_title,
+            "service":     service,
+            "severity":    severity,
+            "status":      status,
+            "alarm":       alarm,
+            "ok":          ok,
+            "error":       error,
+            "info":        info,
+            "skip":        skip,
+            "total":       total,
+            "pass_pct":    pass_pct,
+            "results":     results,
+            "account_ids": account_ids,
+            "regions":     regions,
+        })
+
+    for group in (node.get("groups") or []):
+        extract_controls(group, check_title, controls)
+
     return controls
-
-
-def extract_pillars(data):
-    """Return top-level pillar summaries."""
-    try:
-        return data["groups"][0]["groups"]
-    except (KeyError, IndexError):
-        return []
 
 
 # ---------------------------------------------------------------------------
@@ -190,24 +225,9 @@ header{{margin-bottom:32px}}
 header h1{{font-size:1.6rem;font-weight:700;color:var(--accent);margin-bottom:4px}}
 header p{{color:var(--muted);font-size:.875rem}}
 
-/* ── Pillar cards ─────────────────────────────────────────── */
-.pillars{{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-bottom:32px}}
-.pillar-card{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px}}
-.pillar-card h3{{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:10px}}
-.pillar-card .pillar-title{{font-size:.95rem;font-weight:600;color:var(--text);margin-bottom:12px}}
-.pillar-bar{{height:6px;border-radius:99px;background:var(--surface2);overflow:hidden;margin-bottom:8px}}
-.pillar-bar-fill{{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--ok),var(--accent))}}
-.pillar-stats{{display:flex;gap:10px;flex-wrap:wrap}}
-.pill{{display:inline-flex;align-items:center;gap:4px;font-size:.72rem;font-weight:600;padding:2px 8px;border-radius:99px}}
-.pill.alarm{{background:var(--alarm-bg);color:var(--alarm)}}
-.pill.ok{{background:var(--ok-bg);color:var(--ok)}}
-.pill.error{{background:var(--error-bg);color:var(--error)}}
-.pill.info{{background:var(--info-bg);color:var(--info)}}
-.pill.skip{{background:var(--skip-bg);color:var(--skip)}}
-
-/* ── Summary row ──────────────────────────────────────────── */
+/* ── Summary cards ────────────────────────────────────────── */
 .summary-row{{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:28px}}
-.summary-card{{flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;text-align:center}}
+.summary-card{{flex:1;min-width:110px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;text-align:center}}
 .summary-card .val{{font-size:1.8rem;font-weight:700;line-height:1}}
 .summary-card .lbl{{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:4px}}
 .summary-card.alarm .val{{color:var(--alarm)}}
@@ -217,9 +237,27 @@ header p{{color:var(--muted);font-size:.875rem}}
 .summary-card.skip  .val{{color:var(--skip)}}
 .summary-card.total .val{{color:var(--accent)}}
 
+/* ── Check cards ──────────────────────────────────────────── */
+.checks-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-bottom:32px}}
+.check-card{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;cursor:pointer;transition:border-color .15s}}
+.check-card:hover{{border-color:var(--accent2)}}
+.check-card.active{{border-color:var(--accent);background:rgba(79,156,249,.06)}}
+.check-card .check-title{{font-size:.875rem;font-weight:600;color:var(--text);margin-bottom:10px;line-height:1.4}}
+.check-bar{{height:6px;border-radius:99px;background:var(--surface2);overflow:hidden;margin-bottom:8px}}
+.check-bar-fill{{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--ok),var(--accent))}}
+.check-bar-fill.all-alarm{{background:var(--alarm)}}
+.check-bar-fill.all-skip{{background:var(--skip)}}
+.check-stats{{display:flex;gap:6px;flex-wrap:wrap}}
+.pill{{display:inline-flex;align-items:center;gap:3px;font-size:.7rem;font-weight:600;padding:2px 7px;border-radius:99px}}
+.pill.alarm{{background:var(--alarm-bg);color:var(--alarm)}}
+.pill.ok   {{background:var(--ok-bg);color:var(--ok)}}
+.pill.error{{background:var(--error-bg);color:var(--error)}}
+.pill.info {{background:var(--info-bg);color:var(--info)}}
+.pill.skip {{background:var(--skip-bg);color:var(--skip)}}
+
 /* ── Filters ──────────────────────────────────────────────── */
 .filters{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;margin-bottom:20px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}}
-.filter-group{{display:flex;flex-direction:column;gap:4px;min-width:160px;flex:1}}
+.filter-group{{display:flex;flex-direction:column;gap:4px;min-width:150px;flex:1}}
 .filter-group label{{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}}
 .filter-group input,
 .filter-group select{{background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.85rem;padding:7px 10px;outline:none;transition:border-color .15s;width:100%}}
@@ -232,7 +270,7 @@ header p{{color:var(--muted);font-size:.875rem}}
 /* ── Results count ────────────────────────────────────────── */
 #results-count{{font-size:.8rem;color:var(--muted);margin-bottom:12px}}
 
-/* ── Controls table ───────────────────────────────────────── */
+/* ── Table ────────────────────────────────────────────────── */
 .table-wrap{{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius)}}
 table{{width:100%;border-collapse:collapse;font-size:.82rem}}
 thead tr{{background:var(--surface2)}}
@@ -244,28 +282,27 @@ td{{padding:10px 14px;border-bottom:1px solid var(--border);vertical-align:top}}
 tr:last-child td{{border-bottom:none}}
 tr:hover td{{background:rgba(79,156,249,.04)}}
 tr.expanded td{{background:rgba(79,156,249,.06)}}
-td.status-cell{{white-space:nowrap}}
 td.title-cell{{max-width:360px}}
 td.title-cell .ctrl-title{{font-weight:500;color:var(--text);cursor:pointer}}
 td.title-cell .ctrl-title:hover{{color:var(--accent)}}
 td.title-cell .ctrl-id{{font-family:var(--mono);font-size:.68rem;color:var(--muted);margin-top:2px}}
-td.bar-cell{{min-width:100px}}
+td.check-cell{{color:var(--muted);font-size:.78rem;max-width:200px}}
+td.service-cell{{white-space:nowrap;color:var(--muted)}}
+td.bar-cell{{min-width:90px}}
 .mini-bar{{height:4px;background:var(--surface2);border-radius:99px;overflow:hidden;margin-top:4px}}
 .mini-bar-fill{{height:100%;background:linear-gradient(90deg,var(--ok),var(--accent));border-radius:99px}}
 .pct{{font-size:.75rem;color:var(--muted)}}
-td.service-cell{{white-space:nowrap;color:var(--muted)}}
-td.pillar-cell{{white-space:nowrap;color:var(--muted);font-size:.78rem}}
 
 /* ── Status badge ─────────────────────────────────────────── */
 .badge{{display:inline-flex;align-items:center;gap:4px;font-size:.72rem;font-weight:600;padding:2px 8px;border-radius:99px;white-space:nowrap}}
 .badge::before{{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}}
 .badge.alarm{{background:var(--alarm-bg);color:var(--alarm)}}
-.badge.ok{{background:var(--ok-bg);color:var(--ok)}}
+.badge.ok   {{background:var(--ok-bg);color:var(--ok)}}
 .badge.error{{background:var(--error-bg);color:var(--error)}}
-.badge.info{{background:var(--info-bg);color:var(--info)}}
-.badge.skip{{background:var(--skip-bg);color:var(--skip)}}
+.badge.info {{background:var(--info-bg);color:var(--info)}}
+.badge.skip {{background:var(--skip-bg);color:var(--skip)}}
 
-/* ── Expanded row detail ──────────────────────────────────── */
+/* ── Detail rows ──────────────────────────────────────────── */
 .detail-row td{{padding:0}}
 .detail-row.hidden{{display:none}}
 .detail-inner{{padding:14px 20px 20px;background:var(--surface);border-top:1px solid var(--border)}}
@@ -273,10 +310,10 @@ td.pillar-cell{{white-space:nowrap;color:var(--muted);font-size:.78rem}}
 .detail-heading{{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:8px;margin-top:14px}}
 .results-table{{width:100%;border-collapse:collapse;font-size:.78rem}}
 .results-table th{{background:var(--surface2);padding:6px 10px;text-align:left;color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.06em}}
-.results-table td{{padding:6px 10px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:.72rem;vertical-align:top}}
+.results-table td{{padding:6px 10px;border-bottom:1px solid var(--border);vertical-align:top}}
 .results-table tr:last-child td{{border-bottom:none}}
 .results-table .reason{{font-family:var(--font);font-size:.78rem;color:var(--text)}}
-.results-table .resource{{color:var(--muted);word-break:break-all}}
+.results-table .resource{{color:var(--muted);word-break:break-all;font-family:var(--mono);font-size:.72rem}}
 .no-results{{color:var(--muted);font-size:.82rem;font-style:italic}}
 
 /* ── Pagination ───────────────────────────────────────────── */
@@ -292,9 +329,8 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
 
 /* ── Responsive ───────────────────────────────────────────── */
 @media(max-width:768px){{
-  .pillar-card h3{{font-size:.7rem}}
   th,td{{padding:8px 10px}}
-  td.pillar-cell,td.service-cell{{display:none}}
+  td.check-cell,td.service-cell{{display:none}}
 }}
 </style>
 </head>
@@ -316,9 +352,9 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
   <div class="summary-card skip"> <div class="val">{total_skip}</div> <div class="lbl">Skip</div></div>
 </div>
 
-<!-- Pillar cards -->
-<div class="pillars" id="pillar-cards">
-{pillar_cards}
+<!-- Check cards -->
+<div class="checks-grid" id="checks-grid">
+{check_cards}
 </div>
 
 <!-- Filters -->
@@ -339,10 +375,10 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
     </select>
   </div>
   <div class="filter-group">
-    <label>Pillar</label>
-    <select id="f-pillar">
-      <option value="">All pillars</option>
-      {pillar_options}
+    <label>Check</label>
+    <select id="f-check">
+      <option value="">All checks</option>
+      {check_options}
     </select>
   </div>
   <div class="filter-group">
@@ -385,9 +421,9 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
 <table id="controls-table">
   <thead>
     <tr>
-      <th data-col="status"  class="sorted" data-dir="asc">Status <span class="sort-icon">↕</span></th>
+      <th data-col="status" class="sorted" data-dir="asc">Status <span class="sort-icon">↕</span></th>
       <th data-col="title">Control <span class="sort-icon">↕</span></th>
-      <th data-col="pillar">Pillar <span class="sort-icon">↕</span></th>
+      <th data-col="check">Check <span class="sort-icon">↕</span></th>
       <th data-col="service">Service <span class="sort-icon">↕</span></th>
       <th data-col="alarm">Alarm <span class="sort-icon">↕</span></th>
       <th data-col="ok">OK <span class="sort-icon">↕</span></th>
@@ -401,31 +437,39 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
 <div class="pagination" id="pagination"></div>
 
 <footer>
-  <span>AWS Well-Architected Audit Report</span>
+  <span>AWS Top 10 Security Checks — Audit Report</span>
   <span>Steampipe &amp; Powerpipe</span>
 </footer>
 
-</div><!-- .page -->
+</div>
 
 <script>
 // ── Embedded data ─────────────────────────────────────────────────────────
 const CONTROLS = {controls_json};
 
 // ── State ─────────────────────────────────────────────────────────────────
-let filtered   = [...CONTROLS];
-let sortCol    = 'status';
-let sortDir    = 'asc';
+let filtered    = [...CONTROLS];
+let sortCol     = 'status';
+let sortDir     = 'asc';
 let currentPage = 1;
-let pageSize   = 25;
+let pageSize    = 25;
+let activeCheck = '';
 const STATUS_ORDER = {{alarm:0,error:1,ok:2,info:3,skip:4}};
 
-// ── Pillar card click filter ──────────────────────────────────────────────
-document.querySelectorAll('.pillar-card[data-pillar]').forEach(card => {{
-  card.style.cursor = 'pointer';
+// ── Check card click ──────────────────────────────────────────────────────
+document.querySelectorAll('.check-card[data-check]').forEach(card => {{
   card.addEventListener('click', () => {{
-    const sel = document.getElementById('f-pillar');
-    const val = card.dataset.pillar;
-    sel.value = (sel.value === val) ? '' : val;
+    const val = card.dataset.check;
+    if (activeCheck === val) {{
+      activeCheck = '';
+      card.classList.remove('active');
+      document.getElementById('f-check').value = '';
+    }} else {{
+      document.querySelectorAll('.check-card').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+      activeCheck = val;
+      document.getElementById('f-check').value = val;
+    }}
     applyFilters();
   }});
 }});
@@ -445,29 +489,37 @@ document.querySelectorAll('th[data-col]').forEach(th => {{
 }});
 
 // ── Filters ───────────────────────────────────────────────────────────────
-['f-search','f-status','f-pillar','f-service','f-account','f-region','f-pagesize'].forEach(id => {{
+['f-search','f-status','f-check','f-service','f-account','f-region','f-pagesize'].forEach(id => {{
   const el = document.getElementById(id);
-  el.addEventListener(id === 'f-search' ? 'input' : 'change', applyFilters);
+  el.addEventListener(id === 'f-search' ? 'input' : 'change', () => {{
+    if (id === 'f-check') {{
+      activeCheck = el.value;
+      document.querySelectorAll('.check-card').forEach(c => {{
+        c.classList.toggle('active', c.dataset.check === activeCheck && activeCheck !== '');
+      }});
+    }}
+    applyFilters();
+  }});
 }});
 
 function applyFilters() {{
   const search  = document.getElementById('f-search').value.toLowerCase().trim();
   const status  = document.getElementById('f-status').value;
-  const pillar  = document.getElementById('f-pillar').value;
+  const check   = document.getElementById('f-check').value;
   const service = document.getElementById('f-service').value;
   const account = document.getElementById('f-account').value;
   const region  = document.getElementById('f-region').value;
-  pageSize      = parseInt(document.getElementById('f-pagesize').value) || 0;
-  currentPage   = 1;
+  pageSize = parseInt(document.getElementById('f-pagesize').value) || 0;
+  currentPage = 1;
 
   filtered = CONTROLS.filter(c => {{
     if (status  && c.status  !== status)  return false;
-    if (pillar  && c.pillar  !== pillar)  return false;
+    if (check   && c.check   !== check)   return false;
     if (service && c.service !== service) return false;
     if (account && !c.account_ids.includes(account)) return false;
     if (region  && !c.regions.includes(region))      return false;
     if (search) {{
-      const hay = (c.title + ' ' + c.id + ' ' + c.description + ' ' + c.question).toLowerCase();
+      const hay = (c.title + ' ' + c.id + ' ' + c.description + ' ' + c.check).toLowerCase();
       if (!hay.includes(search)) return false;
     }}
     return true;
@@ -478,18 +530,20 @@ function applyFilters() {{
 function resetFilters() {{
   document.getElementById('f-search').value  = '';
   document.getElementById('f-status').value  = '';
-  document.getElementById('f-pillar').value  = '';
+  document.getElementById('f-check').value   = '';
   document.getElementById('f-service').value = '';
   document.getElementById('f-account').value = '';
   document.getElementById('f-region').value  = '';
   document.getElementById('f-pagesize').value = '25';
-  pageSize = 25;
-  currentPage = 1;
+  pageSize    = 25;
+  activeCheck = '';
+  document.querySelectorAll('.check-card').forEach(c => c.classList.remove('active'));
   filtered = [...CONTROLS];
+  currentPage = 1;
   render();
 }}
 
-// ── Sort comparator ───────────────────────────────────────────────────────
+// ── Sort ──────────────────────────────────────────────────────────────────
 function sortedData() {{
   return [...filtered].sort((a, b) => {{
     let av = a[sortCol], bv = b[sortCol];
@@ -503,7 +557,7 @@ function sortedData() {{
     }}
     if (typeof av === 'string') av = av.toLowerCase();
     if (typeof bv === 'string') bv = bv.toLowerCase();
-    if (av < bv) return sortDir === 'asc' ? -1 : 1;
+    if (av < bv) return sortDir === 'asc' ? -1 :  1;
     if (av > bv) return sortDir === 'asc' ?  1 : -1;
     return 0;
   }});
@@ -526,22 +580,20 @@ function render() {{
   const tbody = document.getElementById('table-body');
   tbody.innerHTML = '';
 
-  slice.forEach((c, i) => {{
-    const pct   = c.pass_pct !== null ? c.pass_pct : null;
+  slice.forEach(c => {{
+    const pct    = c.pass_pct !== null ? c.pass_pct : null;
     const pctStr = pct !== null ? pct + '%' : '—';
     const barW   = pct !== null ? pct : 0;
 
-    // Main row
     const tr = document.createElement('tr');
     tr.className = 'ctrl-row';
-    tr.dataset.idx = i;
     tr.innerHTML = `
-      <td class="status-cell"><span class="badge ${{c.status}}">${{c.status}}</span></td>
+      <td><span class="badge ${{c.status}}">${{c.status}}</span></td>
       <td class="title-cell">
         <div class="ctrl-title" onclick="toggleDetail(this)">${{esc(c.title)}}</div>
         <div class="ctrl-id">${{esc(c.id)}}</div>
       </td>
-      <td class="pillar-cell">${{esc(shortPillar(c.pillar))}}</td>
+      <td class="check-cell">${{esc(c.check)}}</td>
       <td class="service-cell">${{esc(c.service.replace('AWS/',''))}}</td>
       <td>${{c.alarm > 0 ? `<span style="color:var(--alarm);font-weight:600">${{c.alarm}}</span>` : '<span style="color:var(--muted)">0</span>'}}</td>
       <td>${{c.ok    > 0 ? `<span style="color:var(--ok);font-weight:600">${{c.ok}}</span>`    : '<span style="color:var(--muted)">0</span>'}}</td>
@@ -551,16 +603,12 @@ function render() {{
       </td>`;
     tbody.appendChild(tr);
 
-    // Detail row (hidden by default)
     const dr = document.createElement('tr');
     dr.className = 'detail-row hidden';
-    const resultsHtml = buildResultsHtml(c);
     dr.innerHTML = `<td colspan="7"><div class="detail-inner">
       <div class="detail-desc">${{esc(c.description)}}</div>
-      ${{c.question ? `<div class="detail-heading">Question</div><div style="color:var(--text);font-size:.82rem;margin-bottom:8px">${{esc(c.question)}}</div>` : ''}}
-      ${{c.best_practice ? `<div class="detail-heading">Best Practice</div><div style="color:var(--text);font-size:.82rem;margin-bottom:8px">${{esc(c.best_practice)}}</div>` : ''}}
       <div class="detail-heading">Results (${{c.results.length}})</div>
-      ${{resultsHtml}}
+      ${{buildResultsHtml(c)}}
     </div></td>`;
     tbody.appendChild(dr);
   }});
@@ -573,7 +621,7 @@ function buildResultsHtml(c) {{
     return '<div class="no-results">No individual result rows available.</div>';
   }}
   const rows = c.results.slice(0, 200).map(r => {{
-    const region = (r.dimensions || []).find(d => d.key === 'region')?.value || '';
+    const region = (r.dimensions || []).find(d => d.key === 'region')?.value  || '';
     const acct   = (r.dimensions || []).find(d => d.key === 'account_id')?.value || '';
     return `<tr>
       <td><span class="badge ${{r.status}}">${{r.status}}</span></td>
@@ -607,7 +655,6 @@ function renderPagination(pages, total, ps) {{
   let html = `<span class="page-info">${{total}} results</span>`;
   html += `<button onclick="goPage(${{currentPage-1}})" ${{currentPage===1?'disabled':''}}>‹ Prev</button>`;
 
-  // Show up to 7 page buttons with ellipsis
   const range = [];
   for (let i = 1; i <= pages; i++) {{
     if (i===1||i===pages||Math.abs(i-currentPage)<=2) range.push(i);
@@ -617,7 +664,6 @@ function renderPagination(pages, total, ps) {{
     if (p==='…') html += `<span style="color:var(--muted);padding:0 4px">…</span>`;
     else html += `<button class="${{p===currentPage?'active':''}}" onclick="goPage(${{p}})">${{p}}</button>`;
   }});
-
   html += `<button onclick="goPage(${{currentPage+1}})" ${{currentPage===pages?'disabled':''}}>Next ›</button>`;
   pg.innerHTML = html;
 }}
@@ -628,20 +674,8 @@ function goPage(p) {{
   window.scrollTo({{top:document.getElementById('controls-table').offsetTop - 20, behavior:'smooth'}});
 }}
 
-// ── Helpers ───────────────────────────────────────────────────────────────
 function esc(s) {{
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}}
-function shortPillar(p) {{
-  const map = {{
-    'Operational Excellence':'Ops Excellence',
-    'Reliability':'Reliability',
-    'Security':'Security',
-    'Performance Efficiency':'Perf Efficiency',
-    'Cost Optimization':'Cost Optimization',
-    'Sustainability':'Sustainability',
-  }};
-  return map[p] || p;
 }}
 
 // ── Init ──────────────────────────────────────────────────────────────────
@@ -650,56 +684,65 @@ applyFilters();
 </body>
 </html>"""
 
-
-PILLAR_CARD_TEMPLATE = """<div class="pillar-card" data-pillar="{pillar}">
-  <h3>Pillar</h3>
-  <div class="pillar-title">{pillar}</div>
-  <div class="pillar-bar"><div class="pillar-bar-fill" style="width:{pass_pct}%"></div></div>
-  <div class="pillar-stats">
-    <span class="pill alarm">{alarm} alarm</span>
-    <span class="pill ok">{ok} ok</span>
-    {error_pill}
-    {skip_pill}
+CHECK_CARD_TEMPLATE = """\
+<div class="check-card" data-check="{check_title}">
+  <div class="check-title">{check_title}</div>
+  <div class="check-bar"><div class="check-bar-fill{bar_class}" style="width:{pass_pct}%"></div></div>
+  <div class="check-stats">
+    {pills}
   </div>
 </div>"""
 
 
-def build_pillar_cards(pillars: list) -> str:
+def build_check_cards(checks: list[dict]) -> str:
     cards = []
-    for p in pillars:
-        s = p["summary"]["status"]
-        total = sum(s.values())
-        pass_pct = round((s.get("ok", 0) / total * 100)) if total else 0
-        error_pill = f'<span class="pill error">{s["error"]} error</span>' if s.get("error") else ""
-        skip_pill  = f'<span class="pill skip">{s["skip"]} skip</span>'   if s.get("skip")  else ""
-        cards.append(PILLAR_CARD_TEMPLATE.format(
-            pillar=p["title"],
-            pass_pct=pass_pct,
-            alarm=s.get("alarm", 0),
-            ok=s.get("ok", 0),
-            error_pill=error_pill,
-            skip_pill=skip_pill,
+    for check in checks:
+        pct = check["pass_pct"] if check["pass_pct"] is not None else 0
+        total = check["total"]
+
+        if total == 0 or pct == 0:
+            bar_class = " all-alarm" if check["alarm"] > 0 else " all-skip"
+        else:
+            bar_class = ""
+
+        pills = []
+        if check["alarm"]:
+            pills.append(f'<span class="pill alarm">{check["alarm"]} alarm</span>')
+        if check["ok"]:
+            pills.append(f'<span class="pill ok">{check["ok"]} ok</span>')
+        if check["error"]:
+            pills.append(f'<span class="pill error">{check["error"]} error</span>')
+        if check["skip"]:
+            pills.append(f'<span class="pill skip">{check["skip"]} skip</span>')
+        if not pills:
+            pills.append('<span class="pill skip">no data</span>')
+
+        cards.append(CHECK_CARD_TEMPLATE.format(
+            check_title=check["title"],
+            pass_pct=pct,
+            bar_class=bar_class,
+            pills="\n    ".join(pills),
         ))
     return "\n".join(cards)
 
 
-def build_options(values: list, sort=True) -> str:
-    if sort:
-        values = sorted(values)
-    return "\n".join(f'<option value="{v}">{v}</option>' for v in values if v)
+def build_options(values: list) -> str:
+    return "\n".join(f'<option value="{v}">{v}</option>' for v in sorted(values) if v)
 
 
 def generate_html(data: dict, account_id: str) -> str:
     root_summary = data.get("summary", {}).get("status", {})
-    pillars = extract_pillars(data)
-    controls = extract_controls(data)
+    checks   = extract_checks(data)
+    controls = [c for check in checks for c in check["controls"]]
 
-    pillar_names  = sorted(set(c["pillar"]  for c in controls if c["pillar"]))
+    title = (
+        data.get("groups", [{}])[0].get("title", "AWS Account Security Top 10")
+    )
+
+    check_titles  = [ch["title"] for ch in checks]
     service_names = sorted(set(c["service"] for c in controls if c["service"]))
     account_ids   = sorted(set(
-        acct
-        for c in controls
-        for acct in c["account_ids"]
+        acct for c in controls for acct in c["account_ids"]
     ))
     region_ids    = sorted(set(
         r for c in controls for r in c["regions"]
@@ -709,7 +752,7 @@ def generate_html(data: dict, account_id: str) -> str:
     generated = datetime.now().strftime("%B %d, %Y at %H:%M")
 
     return HTML_TEMPLATE.format(
-        title=data.get("groups", [{}])[0].get("title", "AWS Well-Architected Framework"),
+        title=title,
         generated=generated,
         account_id=account_id,
         total_controls=total_controls,
@@ -718,8 +761,10 @@ def generate_html(data: dict, account_id: str) -> str:
         total_error=root_summary.get("error", 0),
         total_info=root_summary.get("info", 0),
         total_skip=root_summary.get("skip", 0),
-        pillar_cards=build_pillar_cards(pillars),
-        pillar_options=build_options(pillar_names),
+        check_cards=build_check_cards(checks),
+        check_options="\n".join(
+            f'<option value="{t}">{t}</option>' for t in check_titles
+        ),
         service_options=build_options(service_names),
         account_options=build_options(account_ids),
         region_options=build_options(region_ids),
@@ -736,26 +781,26 @@ def main() -> None:
     input_path = Path(args.input).resolve()
 
     if not input_path.exists():
-        print(f"[ERROR] File not found: {input_path}", file=sys.stderr)
+        LOGGER.error("File not found: %s", input_path)
         sys.exit(1)
 
-    if args.output:
-        output_path = Path(args.output).resolve()
-    else:
-        output_path = Path(__file__).parent / "reports" / "aws_well_architected.html"
+    output_path = (
+        Path(args.output).resolve()
+        if args.output
+        else Path(__file__).parent / "reports" / "aws_top10.html"
+    )
 
-    print(f"[INFO]  Reading {input_path.name}...")
+    LOGGER.info("Reading %s...", input_path.name)
     with open(input_path, encoding="utf-8") as f:
         data = json.load(f)
 
-    # Infer account ID from filename (first numeric segment)
     account_id = input_path.stem.split("_")[0] if input_path.stem[0].isdigit() else "unknown"
 
-    print("[INFO]  Generating report...")
+    LOGGER.info("Generating report...")
     html = generate_html(data, account_id)
 
     output_path.write_text(html, encoding="utf-8")
-    print(f"[INFO]  Report written to {output_path}")
+    LOGGER.info("Report written to %s", output_path)
 
 
 if __name__ == "__main__":
