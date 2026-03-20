@@ -7,6 +7,7 @@
   "mods": [
     {
       "id": "aws_compliance",
+      "namespace": "aws_compliance",
       "name": "AWS Compliance",
       "description": "CIS, PCI DSS, NIST, SOC 2, HIPAA and more",
       "mod": "github.com/turbot/steampipe-mod-aws-compliance",
@@ -52,6 +53,7 @@
     },
     {
       "id": "aws_well_architected",
+      "namespace": "aws_well_architected",
       "name": "AWS Well-Architected",
       "description": "AWS Well-Architected Framework checks across all pillars",
       "mod": "github.com/turbot/steampipe-mod-aws-well-architected",
@@ -64,6 +66,7 @@
     },
     {
       "id": "aws_top10",
+      "namespace": "aws_top_10",
       "name": "AWS Top 10 Security Checks",
       "description": "High-signal focused set of critical security findings",
       "mod": "github.com/turbot/steampipe-mod-aws-top-10",
@@ -76,6 +79,7 @@
     },
     {
       "id": "aws_perimeter",
+      "namespace": "aws_perimeter",
       "name": "AWS Perimeter",
       "description": "Public exposure and network perimeter checks",
       "mod": "github.com/turbot/steampipe-mod-aws-perimeter",

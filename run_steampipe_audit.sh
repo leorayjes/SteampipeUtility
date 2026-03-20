@@ -259,6 +259,16 @@ for m in c['mods']:
     print(str(m.get('supports_dashboard', False)).lower())
 ")
 
+# Powerpipe mod namespaces — may differ from our internal id (e.g. aws_top_10 vs aws_top10).
+MOD_NAMESPACES=()
+while IFS= read -r line; do MOD_NAMESPACES+=("$line"); done < <(python3 -c "
+import json
+with open('$MODS_CONFIG') as f:
+    c = json.load(f)
+for m in c['mods']:
+    print(m.get('namespace', m['id']))
+")
+
 # SELECTED_BENCHMARK_ID is set by select_benchmark() and consumed by run_mod().
 SELECTED_BENCHMARK_ID=""
 
@@ -332,8 +342,9 @@ run_mod() {
     local mod_id="${MOD_IDS[$index]}"
     local mod_name="${MOD_NAMES[$index]}"
     local mod_path="${MOD_PATHS[$index]}"
-    # Construct the fully-qualified benchmark name from the mod namespace and selected id.
-    local benchmark="${mod_id}.benchmark.${SELECTED_BENCHMARK_ID}"
+    local mod_namespace="${MOD_NAMESPACES[$index]}"
+    # Construct the fully-qualified benchmark name using the powerpipe namespace.
+    local benchmark="${mod_namespace}.benchmark.${SELECTED_BENCHMARK_ID}"
     local supports_html="${MOD_HTML[$index]}"
     local supports_json="${MOD_JSON[$index]}"
     local supports_dashboard="${MOD_DASHBOARD[$index]}"
