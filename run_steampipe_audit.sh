@@ -232,15 +232,6 @@ for m in c['mods']:
     print(m['mod'])
 ")
 
-MOD_BENCHMARKS=()
-while IFS= read -r line; do MOD_BENCHMARKS+=("$line"); done < <(python3 -c "
-import json
-with open('$MODS_CONFIG') as f:
-    c = json.load(f)
-for m in c['mods']:
-    print(m['benchmark'])
-")
-
 MOD_HTML=()
 while IFS= read -r line; do MOD_HTML+=("$line"); done < <(python3 -c "
 import json
@@ -268,6 +259,9 @@ for m in c['mods']:
     print(str(m.get('supports_dashboard', False)).lower())
 ")
 
+# SELECTED_BENCHMARK_ID is set by select_benchmark() and consumed by run_mod().
+SELECTED_BENCHMARK_ID=""
+
 select_mod() {
     echo "  Available mods:"
     echo
@@ -288,12 +282,58 @@ select_mod() {
     done
 }
 
+select_benchmark() {
+    local mod_index="$1"
+    local mod_id="${MOD_IDS[$mod_index]}"
+
+    # Load benchmark list for the selected mod.
+    local bench_ids=()
+    local bench_names=()
+    while IFS='|' read -r bid bname; do
+        bench_ids+=("$bid")
+        bench_names+=("$bname")
+    done < <(python3 -c "
+import json
+with open('$MODS_CONFIG') as f:
+    c = json.load(f)
+mod = next(m for m in c['mods'] if m['id'] == '$mod_id')
+for b in mod['benchmarks']:
+    print(b['id'] + '|' + b['name'])
+")
+
+    if [[ ${#bench_ids[@]} -eq 1 ]]; then
+        # Only one benchmark available — select it automatically.
+        SELECTED_BENCHMARK_ID="${bench_ids[0]}"
+        log "Benchmark: ${bench_names[0]}"
+        return
+    fi
+
+    echo "  Available benchmarks:"
+    echo
+    local i
+    for i in "${!bench_ids[@]}"; do
+        printf "  [%d] %s\n" "$((i+1))" "${bench_names[$i]}"
+    done
+    echo
+
+    local choice=""
+    while true; do
+        read -rp "Select a benchmark [1-${#bench_ids[@]}]: " choice
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#bench_ids[@]} )); then
+            SELECTED_BENCHMARK_ID="${bench_ids[$(( choice - 1 ))]}"
+            return
+        fi
+        warn "Invalid selection. Please enter a number between 1 and ${#bench_ids[@]}."
+    done
+}
+
 run_mod() {
     local index="$1"
     local mod_id="${MOD_IDS[$index]}"
     local mod_name="${MOD_NAMES[$index]}"
     local mod_path="${MOD_PATHS[$index]}"
-    local benchmark="${MOD_BENCHMARKS[$index]}"
+    # Construct the fully-qualified benchmark name from the mod namespace and selected id.
+    local benchmark="${mod_id}.benchmark.${SELECTED_BENCHMARK_ID}"
     local supports_html="${MOD_HTML[$index]}"
     local supports_json="${MOD_JSON[$index]}"
     local supports_dashboard="${MOD_DASHBOARD[$index]}"
@@ -412,6 +452,7 @@ section "Mod Selection"
 
 while true; do
     select_mod
+    select_benchmark "$SELECTED_INDEX"
     run_mod "$SELECTED_INDEX"
 
     echo
