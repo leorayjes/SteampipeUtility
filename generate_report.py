@@ -38,6 +38,16 @@ def parse_args() -> argparse.Namespace:
 
 STATUS_ORDER = ["alarm", "error", "ok", "info", "skip"]
 
+# Canonical display names for Well-Architected pillar IDs.
+PILLAR_NAMES = {
+    "operationalExcellence": "Operational Excellence",
+    "reliability":           "Reliability",
+    "security":              "Security",
+    "performance":           "Performance Efficiency",
+    "costOptimization":      "Cost Optimization",
+    "sustainability":        "Sustainability",
+}
+
 def extract_controls(node, pillar="", question="", best_practice="", controls=None):
     """Recursively walk the group tree and collect all controls into a flat list."""
     if controls is None:
@@ -47,13 +57,15 @@ def extract_controls(node, pillar="", question="", best_practice="", controls=No
     title = node.get("title", "")
     tags  = node.get("tags", {}) or {}
 
-    # Determine hierarchy labels from tags / depth
+    # Use pillar_id tag to identify the pillar level unambiguously.
+    # pillar_id appears on both pillar groups and question groups, so we
+    # only update the pillar label when we first encounter it (depth 2).
     pillar_id = tags.get("pillar_id", "")
-    if pillar_id:
-        pillar = title
-    elif depth == 2:
-        question = title
+    if pillar_id and depth == 2:
+        pillar = PILLAR_NAMES.get(pillar_id, title)
     elif depth == 3:
+        question = title
+    elif depth == 4:
         best_practice = title
 
     for group in (node.get("groups") or []):
