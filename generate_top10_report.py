@@ -147,6 +147,13 @@ def extract_controls(node: dict, check_title: str, controls: list | None = None)
             if d.get("key") == "account_id" and d.get("value")
         ))
 
+        regions = sorted(set(
+            d["value"]
+            for r in results
+            for d in (r.get("dimensions") or [])
+            if d.get("key") == "region" and d.get("value")
+        ))
+
         controls.append({
             "id":          ctrl.get("control_id", ""),
             "title":       ctrl.get("title", ""),
@@ -164,6 +171,7 @@ def extract_controls(node: dict, check_title: str, controls: list | None = None)
             "pass_pct":    pass_pct,
             "results":     results,
             "account_ids": account_ids,
+            "regions":     regions,
         })
 
     for group in (node.get("groups") or []):
@@ -388,6 +396,13 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
     </select>
   </div>
   <div class="filter-group">
+    <label>Region</label>
+    <select id="f-region">
+      <option value="">All regions</option>
+      {region_options}
+    </select>
+  </div>
+  <div class="filter-group">
     <label>Show</label>
     <select id="f-pagesize">
       <option value="25">25 / page</option>
@@ -474,7 +489,7 @@ document.querySelectorAll('th[data-col]').forEach(th => {{
 }});
 
 // ── Filters ───────────────────────────────────────────────────────────────
-['f-search','f-status','f-check','f-service','f-account','f-pagesize'].forEach(id => {{
+['f-search','f-status','f-check','f-service','f-account','f-region','f-pagesize'].forEach(id => {{
   const el = document.getElementById(id);
   el.addEventListener(id === 'f-search' ? 'input' : 'change', () => {{
     if (id === 'f-check') {{
@@ -493,6 +508,7 @@ function applyFilters() {{
   const check   = document.getElementById('f-check').value;
   const service = document.getElementById('f-service').value;
   const account = document.getElementById('f-account').value;
+  const region  = document.getElementById('f-region').value;
   pageSize = parseInt(document.getElementById('f-pagesize').value) || 0;
   currentPage = 1;
 
@@ -501,6 +517,7 @@ function applyFilters() {{
     if (check   && c.check   !== check)   return false;
     if (service && c.service !== service) return false;
     if (account && !c.account_ids.includes(account)) return false;
+    if (region  && !c.regions.includes(region))      return false;
     if (search) {{
       const hay = (c.title + ' ' + c.id + ' ' + c.description + ' ' + c.check).toLowerCase();
       if (!hay.includes(search)) return false;
@@ -516,6 +533,7 @@ function resetFilters() {{
   document.getElementById('f-check').value   = '';
   document.getElementById('f-service').value = '';
   document.getElementById('f-account').value = '';
+  document.getElementById('f-region').value  = '';
   document.getElementById('f-pagesize').value = '25';
   pageSize    = 25;
   activeCheck = '';
@@ -726,6 +744,9 @@ def generate_html(data: dict, account_id: str) -> str:
     account_ids   = sorted(set(
         acct for c in controls for acct in c["account_ids"]
     ))
+    region_ids    = sorted(set(
+        r for c in controls for r in c["regions"]
+    ))
 
     total_controls = len(controls)
     generated = datetime.now().strftime("%B %d, %Y at %H:%M")
@@ -746,6 +767,7 @@ def generate_html(data: dict, account_id: str) -> str:
         ),
         service_options=build_options(service_names),
         account_options=build_options(account_ids),
+        region_options=build_options(region_ids),
         controls_json=json.dumps(controls, separators=(",", ":")),
     )
 
