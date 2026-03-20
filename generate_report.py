@@ -108,6 +108,12 @@ def extract_controls(node, pillar="", question="", best_practice="", controls=No
             "total":        total,
             "pass_pct":     pass_pct,
             "results":      results,
+            "account_ids":  sorted(set(
+                d["value"]
+                for r in results
+                for d in (r.get("dimensions") or [])
+                if d.get("key") == "account_id" and d.get("value")
+            )),
         })
 
     return controls
@@ -329,6 +335,13 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
     </select>
   </div>
   <div class="filter-group">
+    <label>Account ID</label>
+    <select id="f-account">
+      <option value="">All accounts</option>
+      {account_options}
+    </select>
+  </div>
+  <div class="filter-group">
     <label>Show</label>
     <select id="f-pagesize">
       <option value="25">25 / page</option>
@@ -407,7 +420,7 @@ document.querySelectorAll('th[data-col]').forEach(th => {{
 }});
 
 // ── Filters ───────────────────────────────────────────────────────────────
-['f-search','f-status','f-pillar','f-service','f-pagesize'].forEach(id => {{
+['f-search','f-status','f-pillar','f-service','f-account','f-pagesize'].forEach(id => {{
   const el = document.getElementById(id);
   el.addEventListener(id === 'f-search' ? 'input' : 'change', applyFilters);
 }});
@@ -417,6 +430,7 @@ function applyFilters() {{
   const status  = document.getElementById('f-status').value;
   const pillar  = document.getElementById('f-pillar').value;
   const service = document.getElementById('f-service').value;
+  const account = document.getElementById('f-account').value;
   pageSize      = parseInt(document.getElementById('f-pagesize').value) || 0;
   currentPage   = 1;
 
@@ -424,6 +438,7 @@ function applyFilters() {{
     if (status  && c.status  !== status)  return false;
     if (pillar  && c.pillar  !== pillar)  return false;
     if (service && c.service !== service) return false;
+    if (account && !c.account_ids.includes(account)) return false;
     if (search) {{
       const hay = (c.title + ' ' + c.id + ' ' + c.description + ' ' + c.question).toLowerCase();
       if (!hay.includes(search)) return false;
@@ -438,6 +453,7 @@ function resetFilters() {{
   document.getElementById('f-status').value  = '';
   document.getElementById('f-pillar').value  = '';
   document.getElementById('f-service').value = '';
+  document.getElementById('f-account').value = '';
   document.getElementById('f-pagesize').value = '25';
   pageSize = 25;
   currentPage = 1;
@@ -652,6 +668,11 @@ def generate_html(data: dict, account_id: str) -> str:
 
     pillar_names  = sorted(set(c["pillar"]  for c in controls if c["pillar"]))
     service_names = sorted(set(c["service"] for c in controls if c["service"]))
+    account_ids   = sorted(set(
+        acct
+        for c in controls
+        for acct in c["account_ids"]
+    ))
 
     total_controls = len(controls)
     generated = datetime.now().strftime("%B %d, %Y at %H:%M")
@@ -669,6 +690,7 @@ def generate_html(data: dict, account_id: str) -> str:
         pillar_cards=build_pillar_cards(pillars),
         pillar_options=build_options(pillar_names),
         service_options=build_options(service_names),
+        account_options=build_options(account_ids),
         controls_json=json.dumps(controls, separators=(",", ":")),
     )
 
