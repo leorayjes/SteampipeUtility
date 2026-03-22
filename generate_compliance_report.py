@@ -273,25 +273,38 @@ header p{{color:var(--muted);font-size:.875rem}}
 .summary-card.total .val{{color:var(--accent)}}
 
 /* ── Charts ───────────────────────────────────────────────── */
-.charts-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:20px;margin-bottom:32px}}
-.chart-card{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px}}
-.chart-title{{font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:16px}}
+.insights-section{{margin-bottom:28px}}
+.insights-toggle{{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 18px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;list-style:none;color:var(--text);font-size:.85rem;font-weight:600;letter-spacing:.02em;user-select:none;transition:border-color .15s}}
+.insights-toggle::-webkit-details-marker{{display:none}}
+.insights-toggle:hover{{border-color:var(--accent)}}
+.insights-toggle .toggle-icon{{font-size:.7rem;color:var(--muted);transition:transform .2s}}
+details.insights-open .insights-toggle .toggle-icon{{transform:rotate(180deg)}}
+details.insights-open .insights-toggle{{border-bottom-left-radius:0;border-bottom-right-radius:0;border-bottom-color:transparent}}
+.insights-body{{background:var(--surface);border:1px solid var(--border);border-top:none;border-bottom-left-radius:var(--radius);border-bottom-right-radius:var(--radius);padding:20px}}
+.charts-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:20px}}
+.chart-card{{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:20px}}
+.chart-title{{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:14px;display:flex;justify-content:space-between;align-items:center}}
 .chart-subtitle{{font-size:.72rem;color:var(--muted);margin-top:8px;text-align:center}}
+.chart-empty{{font-size:.8rem;color:var(--muted);font-style:italic;padding:12px 0}}
 
 /* horizontal bar chart */
-.hbar-row{{display:flex;align-items:center;gap:10px;margin-bottom:8px}}
-.hbar-label{{font-size:.75rem;color:var(--text);width:130px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}}
-.hbar-track{{flex:1;height:14px;background:var(--surface2);border-radius:4px;overflow:hidden;position:relative}}
-.hbar-fill{{height:100%;border-radius:4px;transition:width .4s ease}}
+.hbar-row{{display:flex;align-items:center;gap:10px;margin-bottom:7px;cursor:pointer;border-radius:4px;padding:2px 4px;transition:background .12s}}
+.hbar-row:hover{{background:rgba(79,156,249,.07)}}
+.hbar-row.active-bar{{background:rgba(79,156,249,.14);outline:1px solid var(--accent)}}
+.hbar-label{{font-size:.74rem;color:var(--text);width:130px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}}
+.hbar-track{{flex:1;height:14px;background:var(--bg);border-radius:4px;overflow:hidden}}
+.hbar-fill{{height:100%;border-radius:4px;transition:width .35s ease}}
 .hbar-val{{font-size:.72rem;color:var(--muted);width:52px;text-align:left;flex-shrink:0}}
 
 /* donut */
 .donut-wrap{{display:flex;align-items:center;gap:24px;flex-wrap:wrap}}
 .donut-legend{{display:flex;flex-direction:column;gap:6px}}
-.legend-item{{display:flex;align-items:center;gap:7px;font-size:.75rem;color:var(--text)}}
+.legend-item{{display:flex;align-items:center;gap:7px;font-size:.75rem;color:var(--text);cursor:pointer;border-radius:4px;padding:2px 6px;transition:background .12s}}
+.legend-item:hover{{background:rgba(79,156,249,.08)}}
+.legend-item.active-legend{{background:rgba(79,156,249,.15);outline:1px solid var(--accent)}}
 .legend-dot{{width:10px;height:10px;border-radius:50%;flex-shrink:0}}
 
-/* gauge / dial */
+/* gauge */
 .gauge-wrap{{display:flex;flex-direction:column;align-items:center}}
 .gauge-label{{font-size:2rem;font-weight:700;margin-top:-8px}}
 .gauge-sub{{font-size:.75rem;color:var(--muted);margin-top:2px}}
@@ -391,47 +404,57 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
   <div class="summary-card skip"> <div class="val">{total_skip}</div> <div class="lbl">Skip</div></div>
 </div>
 
-<!-- Charts -->
-<div class="charts-grid" id="charts-grid">
+<!-- Charts — collapsible insights panel -->
+<div class="insights-section">
+<details id="insights-details" open>
+  <summary class="insights-toggle" onclick="this.parentElement.classList.toggle('insights-open')">
+    <span>&#x2728; Insights &nbsp;<span style="color:var(--muted);font-weight:400;font-size:.75rem">— updates with filters</span></span>
+    <span class="toggle-icon">&#9660;</span>
+  </summary>
+  <div class="insights-body">
+    <div class="charts-grid" id="charts-grid">
 
-  <!-- Chart 1: Top 10 Services by Alarm -->
-  <div class="chart-card">
-    <div class="chart-title">Top 10 Services by Alarm Count</div>
-    <div id="chart-top-alarm"></div>
-  </div>
+      <!-- Chart 1: Top 10 Services by Alarm -->
+      <div class="chart-card">
+        <div class="chart-title">Top Services by Alarm <span id="c1-count" style="color:var(--muted);font-weight:400;font-size:.7rem"></span></div>
+        <div id="chart-top-alarm"></div>
+      </div>
 
-  <!-- Chart 2: Overall Status Donut -->
-  <div class="chart-card">
-    <div class="chart-title">Overall Status Distribution</div>
-    <div class="donut-wrap">
-      <svg id="chart-donut" width="160" height="160" viewBox="0 0 160 160"></svg>
-      <div class="donut-legend" id="donut-legend"></div>
+      <!-- Chart 2: Overall Status Donut -->
+      <div class="chart-card">
+        <div class="chart-title">Status Distribution</div>
+        <div class="donut-wrap">
+          <svg id="chart-donut" width="160" height="160" viewBox="0 0 160 160"></svg>
+          <div class="donut-legend" id="donut-legend"></div>
+        </div>
+        <div class="chart-subtitle" id="donut-subtitle"></div>
+      </div>
+
+      <!-- Chart 3: Pass rate gauge -->
+      <div class="chart-card">
+        <div class="chart-title">Overall Pass Rate</div>
+        <div class="gauge-wrap">
+          <svg id="chart-gauge" width="220" height="130" viewBox="0 0 220 130"></svg>
+          <div class="gauge-label" id="gauge-label"></div>
+          <div class="gauge-sub">controls passing</div>
+        </div>
+      </div>
+
+      <!-- Chart 4: Top 10 Compliance Programs by Fail Rate -->
+      <div class="chart-card">
+        <div class="chart-title">Compliance Programs by Fail Rate</div>
+        <div id="chart-prog-fail"></div>
+      </div>
+
+      <!-- Chart 5: Pass Rate by Account -->
+      <div class="chart-card">
+        <div class="chart-title">Pass Rate by Account</div>
+        <div id="chart-acct-pass"></div>
+      </div>
+
     </div>
-    <div class="chart-subtitle" id="donut-subtitle"></div>
   </div>
-
-  <!-- Chart 3: Compliance pass rate gauge -->
-  <div class="chart-card">
-    <div class="chart-title">Overall Pass Rate</div>
-    <div class="gauge-wrap">
-      <svg id="chart-gauge" width="220" height="130" viewBox="0 0 220 130"></svg>
-      <div class="gauge-label" id="gauge-label"></div>
-      <div class="gauge-sub">controls passing</div>
-    </div>
-  </div>
-
-  <!-- Chart 4: Top 10 Compliance Programs by Fail Rate -->
-  <div class="chart-card">
-    <div class="chart-title">Top 10 Compliance Programs by Fail Rate</div>
-    <div id="chart-prog-fail"></div>
-  </div>
-
-  <!-- Chart 5: Worst Pass Rate by Account -->
-  <div class="chart-card">
-    <div class="chart-title">Pass Rate by Account</div>
-    <div id="chart-acct-pass"></div>
-  </div>
-
+</details>
 </div>
 
 <!-- Filters -->
@@ -530,21 +553,22 @@ let pageSize    = 25;
 let activeService = '';
 const STATUS_ORDER = {{alarm:0,error:1,ok:2,info:3,skip:4}};
 
-// ── Chart data (injected by Python) ──────────────────────────────────────
+// ── Chart data (static baseline injected by Python) ──────────────────────
 const CHART_DATA = {chart_data_json};
 
-// ── Charts ────────────────────────────────────────────────────────────────
-function hBar(containerId, rows, colorFn) {{
+// ── Chart helpers ─────────────────────────────────────────────────────────
+function hBar(containerId, rows, colorFn, onClickFn) {{
   const el = document.getElementById(containerId);
   if (!el) return;
-  const max = rows[0]?.[1] || 1;
+  if (!rows || !rows.length) {{ el.innerHTML = '<div class="chart-empty">No data for current filters.</div>'; return; }}
+  const max = rows.reduce((m,r)=>Math.max(m,r[1]),0) || 1;
   el.innerHTML = rows.map(([label, val]) => `
-    <div class="hbar-row">
+    <div class="hbar-row" data-label="${{esc(label)}}" onclick="if(typeof ${{onClickFn}}==='function')${{onClickFn}}('${{esc(label)}}')">
       <div class="hbar-label" title="${{esc(label)}}">${{esc(label)}}</div>
       <div class="hbar-track">
         <div class="hbar-fill" style="width:${{Math.round(val/max*100)}}%;background:${{colorFn(val,max)}}"></div>
       </div>
-      <div class="hbar-val">${{val.toLocaleString()}}</div>
+      <div class="hbar-val">${{typeof val==='number'&&val<1&&val>0?val+'%':val.toLocaleString()}}</div>
     </div>`).join('');
 }}
 
@@ -552,75 +576,148 @@ function drawDonut(svgId, legendId, subtitleId, slices) {{
   const svg = document.getElementById(svgId);
   const legend = document.getElementById(legendId);
   const sub = document.getElementById(subtitleId);
-  const cx=80, cy=80, r=60, ir=38;
+  const cx=80,cy=80,r=60,ir=38;
   const total = slices.reduce((s,x)=>s+x.v,0);
-  if (!total) return;
-  let angle = -Math.PI/2;
-  let paths = '';
-  slices.forEach(s => {{
-    if (!s.v) return;
-    const a = (s.v/total)*Math.PI*2;
-    const x1=cx+r*Math.cos(angle), y1=cy+r*Math.sin(angle);
-    const x2=cx+r*Math.cos(angle+a), y2=cy+r*Math.sin(angle+a);
-    const xi1=cx+ir*Math.cos(angle), yi1=cy+ir*Math.sin(angle);
-    const xi2=cx+ir*Math.cos(angle+a), yi2=cy+ir*Math.sin(angle+a);
-    const lg = a > Math.PI ? 1 : 0;
-    paths += `<path d="M${{x1}},${{y1}} A${{r}},${{r}} 0 ${{lg}},1 ${{x2}},${{y2}} L${{xi2}},${{yi2}} A${{ir}},${{ir}} 0 ${{lg}},0 ${{xi1}},${{yi1}} Z" fill="${{s.color}}" opacity=".9"/>`;
-    angle += a;
+  if (!total) {{ svg.innerHTML='<text x="80" y="85" text-anchor="middle" font-size="11" fill="#64748b">No data</text>'; legend.innerHTML=''; return; }}
+  let angle=-Math.PI/2, paths='';
+  slices.forEach(s=>{{
+    if(!s.v) return;
+    const a=(s.v/total)*Math.PI*2;
+    const x1=cx+r*Math.cos(angle),y1=cy+r*Math.sin(angle);
+    const x2=cx+r*Math.cos(angle+a),y2=cy+r*Math.sin(angle+a);
+    const xi1=cx+ir*Math.cos(angle),yi1=cy+ir*Math.sin(angle);
+    const xi2=cx+ir*Math.cos(angle+a),yi2=cy+ir*Math.sin(angle+a);
+    const lg=a>Math.PI?1:0;
+    paths+=`<path d="M${{x1}},${{y1}} A${{r}},${{r}} 0 ${{lg}},1 ${{x2}},${{y2}} L${{xi2}},${{yi2}} A${{ir}},${{ir}} 0 ${{lg}},0 ${{xi1}},${{yi1}} Z" fill="${{s.color}}" opacity=".9" style="cursor:pointer" onclick="filterByStatus('${{s.label}}')"><title>${{s.label}}: ${{s.v.toLocaleString()}}</title></path>`;
+    angle+=a;
   }});
-  svg.innerHTML = paths + `<text x="${{cx}}" y="${{cy+5}}" text-anchor="middle" font-size="13" fill="#e2e8f0" font-weight="600">${{Math.round(slices.find(s=>s.label==='ok')?.v/total*100||0)}}%</text><text x="${{cx}}" y="${{cy+20}}" text-anchor="middle" font-size="9" fill="#64748b">passing</text>`;
-  legend.innerHTML = slices.filter(s=>s.v>0).map(s=>
-    `<div class="legend-item"><div class="legend-dot" style="background:${{s.color}}"></div><span>${{s.label}}: ${{s.v.toLocaleString()}}</span></div>`
+  const okPct=Math.round((slices.find(s=>s.label==='ok')?.v||0)/total*100);
+  svg.innerHTML=paths+`<text x="${{cx}}" y="${{cy+5}}" text-anchor="middle" font-size="13" fill="#e2e8f0" font-weight="600">${{okPct}}%</text><text x="${{cx}}" y="${{cy+20}}" text-anchor="middle" font-size="9" fill="#64748b">passing</text>`;
+  legend.innerHTML=slices.filter(s=>s.v>0).map(s=>
+    `<div class="legend-item" onclick="filterByStatus('${{s.label}}')"><div class="legend-dot" style="background:${{s.color}}"></div><span>${{s.label}}: ${{s.v.toLocaleString()}}</span></div>`
   ).join('');
-  if (sub) sub.textContent = `${{total.toLocaleString()}} total results`;
+  if(sub) sub.textContent=`${{total.toLocaleString()}} total results`;
 }}
 
 function drawGauge(svgId, labelId, pct) {{
-  const svg = document.getElementById(svgId);
-  const label = document.getElementById(labelId);
-  const cx=110, cy=110, r=90;
-  const startA = Math.PI, sweep = Math.PI;
-  const fillA = sweep * (pct/100);
-  const x1=cx+r*Math.cos(startA), y1=cy+r*Math.sin(startA);
-  const x2=cx+r*Math.cos(startA+fillA), y2=cy+r*Math.sin(startA+fillA);
-  const lg = fillA > Math.PI ? 1 : 0;
-  const color = pct >= 70 ? '#22c55e' : pct >= 40 ? '#f59e0b' : '#ef4444';
-  svg.innerHTML =
+  const svg=document.getElementById(svgId), label=document.getElementById(labelId);
+  const cx=110,cy=110,r=90;
+  const startA=Math.PI, fillA=Math.PI*(pct/100);
+  const x1=cx+r*Math.cos(startA),y1=cy+r*Math.sin(startA);
+  const x2=cx+r*Math.cos(startA+fillA),y2=cy+r*Math.sin(startA+fillA);
+  const lg=fillA>Math.PI?1:0;
+  const color=pct>=70?'#22c55e':pct>=40?'#f59e0b':'#ef4444';
+  svg.innerHTML=
     `<path d="M${{cx+r*Math.cos(startA)}},${{cy+r*Math.sin(startA)}} A${{r}},${{r}} 0 0,1 ${{cx-r}},${{cy}}" fill="none" stroke="#22263a" stroke-width="16" stroke-linecap="round"/>` +
-    (pct > 0 ? `<path d="M${{x1}},${{y1}} A${{r}},${{r}} 0 ${{lg}},1 ${{x2}},${{y2}}" fill="none" stroke="${{color}}" stroke-width="16" stroke-linecap="round"/>` : '');
-  label.style.color = color;
-  label.textContent = pct + '%';
+    (pct>0?`<path d="M${{x1}},${{y1}} A${{r}},${{r}} 0 ${{lg}},1 ${{x2}},${{y2}}" fill="none" stroke="${{color}}" stroke-width="16" stroke-linecap="round"/>`:'');
+  label.style.color=color;
+  label.textContent=pct+'%';
 }}
 
-(function initCharts() {{
-  const d = CHART_DATA;
+// ── Live chart computation from current filtered set ──────────────────────
+function renderCharts(data) {{
+  // --- Chart 1: top services by alarm ---
+  const svcAlarm={{}}, svcOk={{}}, svcTotal={{}};
+  data.forEach(c=>{{
+    const s=c.service||'Unknown';
+    svcAlarm[s]=(svcAlarm[s]||0)+c.alarm;
+    svcOk[s]   =(svcOk[s]   ||0)+c.ok;
+    svcTotal[s]=(svcTotal[s]||0)+c.total;
+  }});
+  const topAlarm=Object.entries(svcAlarm).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  hBar('chart-top-alarm', topAlarm,
+    (v,m)=>`hsl(${{Math.round((1-v/m)*30)}},80%,55%)`,
+    'filterByService');
 
-  // Chart 1: Top alarms (horizontal bar, alarm gradient)
-  hBar('chart-top-alarm', d.top_alarm,
-    (v,m) => `hsl(${{Math.round((1-v/m)*30)}},80%,55%)`);
-
-  // Chart 2: Donut — overall status
+  // --- Chart 2: donut from filtered result status counts ---
+  let rAlarm=0,rOk=0,rError=0,rInfo=0,rSkip=0;
+  data.forEach(c=>{{ rAlarm+=c.alarm; rOk+=c.ok; rError+=c.error; rInfo+=c.info; rSkip+=c.skip; }});
   drawDonut('chart-donut','donut-legend','donut-subtitle',[
-    {{label:'alarm', v:d.total_alarm, color:'#ef4444'}},
-    {{label:'error', v:d.total_error, color:'#f97316'}},
-    {{label:'ok',    v:d.total_ok,    color:'#22c55e'}},
-    {{label:'info',  v:d.total_info,  color:'#38bdf8'}},
-    {{label:'skip',  v:d.total_skip,  color:'#475569'}},
+    {{label:'alarm',v:rAlarm,color:'#ef4444'}},
+    {{label:'error',v:rError,color:'#f97316'}},
+    {{label:'ok',   v:rOk,   color:'#22c55e'}},
+    {{label:'info', v:rInfo, color:'#38bdf8'}},
+    {{label:'skip', v:rSkip, color:'#475569'}},
   ]);
 
-  // Chart 3: Pass rate gauge
-  drawGauge('chart-gauge','gauge-label', d.pass_pct);
+  // --- Chart 3: gauge ---
+  const grand=rAlarm+rOk+rError+rInfo+rSkip;
+  const pct=grand>0?Math.round(rOk/grand*100):0;
+  drawGauge('chart-gauge','gauge-label',pct);
 
-  // Chart 4: Top 10 compliance programs by fail rate (red tones)
-  hBar('chart-prog-fail', d.prog_fail_rate,
-    (v) => `hsl(${{Math.round((100-v)*0.4)}},75%,52%)`);
+  // --- Chart 4: compliance program fail rate ---
+  const progFail={{}}, progTotal={{}};
+  data.forEach(c=>{{
+    (c.compliance_programs||[]).forEach(p=>{{
+      (c.results||[]).forEach(r=>{{
+        progTotal[p]=(progTotal[p]||0)+1;
+        if(r.status==='alarm'||r.status==='error') progFail[p]=(progFail[p]||0)+1;
+      }});
+    }});
+  }});
+  const progRows=Object.entries(progTotal)
+    .filter(([,t])=>t>=5)
+    .map(([p,t])=>[ PROGRAM_NAMES[p]||p, Math.round((progFail[p]||0)/t*100) ])
+    .sort((a,b)=>b[1]-a[1]).slice(0,10);
+  hBar('chart-prog-fail', progRows,
+    (v)=>`hsl(${{Math.round((100-v)*0.4)}},75%,52%)`,
+    'filterByProgram');
 
-  // Chart 5: Pass rate by account — green→red gradient
-  hBar('chart-acct-pass', d.worst_acct_pass,
-    (v) => `hsl(${{Math.round(v*1.2)}},70%,50%)`);
+  // --- Chart 5: pass rate by account ---
+  const acctOk={{}}, acctTotal={{}};
+  data.forEach(c=>{{
+    (c.results||[]).forEach(r=>{{
+      const dims=r.dimensions||[];
+      const acct=(dims.find(d=>d.key==='account_id')||{{}}).value||'';
+      if(!acct||acct==='<nil>') return;
+      acctTotal[acct]=(acctTotal[acct]||0)+1;
+      if(r.status==='ok') acctOk[acct]=(acctOk[acct]||0)+1;
+    }});
+  }});
+  const acctRows=Object.entries(acctTotal)
+    .map(([a,t])=>[a, Math.round((acctOk[a]||0)/t*100)])
+    .sort((a,b)=>a[1]-b[1]).slice(0,12);
+  hBar('chart-acct-pass', acctRows,
+    (v)=>`hsl(${{Math.round(v*1.2)}},70%,50%)`,
+    'filterByAccount');
+}}
+
+// ── Chart click-through filter functions ──────────────────────────────────
+function filterByService(name) {{
+  const el=document.getElementById('f-service');
+  el.value = el.value===name ? '' : name;
+  activeService=el.value;
+  applyFilters();
+}}
+function filterByStatus(status) {{
+  const el=document.getElementById('f-status');
+  el.value = el.value===status ? '' : status;
+  applyFilters();
+}}
+function filterByProgram(name) {{
+  // Map display name back to key
+  const key=Object.entries(PROGRAM_NAMES).find(([,v])=>v===name)?.[0] || name;
+  const el=document.getElementById('f-program');
+  el.value = el.value===key ? '' : key;
+  applyFilters();
+}}
+function filterByAccount(acct) {{
+  const el=document.getElementById('f-account');
+  el.value = el.value===acct ? '' : acct;
+  applyFilters();
+}}
+
+// ── Program name map (mirrors Python PROGRAM_NAMES) ───────────────────────
+const PROGRAM_NAMES = {program_names_json};
+
+// ── Details open/close state ──────────────────────────────────────────────
+(function() {{
+  const d=document.getElementById('insights-details');
+  if(d && d.open) d.classList.add('insights-open');
+  d.addEventListener('toggle',()=>d.classList.toggle('insights-open',d.open));
 }})();
 
-// ── Service filter (dropdown only — no card grid) ─────────────────────────
+// ── Service filter (dropdown only) ────────────────────────────────────────
 
 // ── Sort ──────────────────────────────────────────────────────────────────
 document.querySelectorAll('th[data-col]').forEach(th => {{
@@ -669,6 +766,7 @@ function applyFilters() {{
     }}
     return true;
   }});
+  renderCharts(filtered);
   render();
 }}
 
@@ -684,6 +782,7 @@ function resetFilters() {{
   activeService = '';
   filtered = [...CONTROLS];
   currentPage = 1;
+  renderCharts(filtered);
   render();
 }}
 
@@ -810,6 +909,7 @@ function esc(s) {{
 }}
 
 applyFilters();
+renderCharts(CONTROLS);
 </script>
 </body>
 </html>"""
@@ -935,6 +1035,7 @@ def generate_html(data: dict, account_id: str) -> str:
         account_options=build_options(account_ids),
         region_options=build_options(region_ids),
         chart_data_json=json.dumps(chart_data, separators=(",", ":")),
+        program_names_json=json.dumps(PROGRAM_NAMES, separators=(",", ":")),
         controls_json=json.dumps(controls, separators=(",", ":")),
     )
 
