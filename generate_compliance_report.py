@@ -165,6 +165,15 @@ def extract_controls(data: dict) -> list[dict]:
     return controls
 
 
+def _arn_account(resource: str) -> str:
+    """Extract the account ID embedded in an AWS ARN, or empty string if not present."""
+    # ARN format: arn:partition:service:region:account-id:resource
+    parts = resource.split(":")
+    if len(parts) >= 5 and parts[0] == "arn" and parts[4].isdigit() and len(parts[4]) == 12:
+        return parts[4]
+    return ""
+
+
 def _walk(node: dict, service: str, controls: list) -> None:
     for ctrl in (node.get("controls") or []):
         ctrl_svc = (ctrl.get("tags") or {}).get("service", service or "Unknown")
@@ -174,6 +183,12 @@ def _walk(node: dict, service: str, controls: list) -> None:
         # The same resource can appear once per compliance framework it belongs
         # to, or once per member account that sees a shared payer-account resource.
         # Deduplication produces one row per unique resource outcome.
+        #
+        # Attribution rule: if the account ID embedded in the resource ARN
+        # differs from the dimension account_id, the resource originates in the
+        # ARN account (e.g. a payer-account CloudTrail seen by a member account).
+        # In that case we rewrite the account_id dimension to the ARN account so
+        # the finding is attributed to the account that owns the resource.
         raw_results = ctrl.get("results") or []
         seen_keys: set = set()
         results: list = []
@@ -181,6 +196,24 @@ def _walk(node: dict, service: str, controls: list) -> None:
             key = (r.get("resource", ""), r.get("status", ""))
             if key not in seen_keys:
                 seen_keys.add(key)
+                dims = r.get("dimensions") or []
+                dim_account = next(
+                    (d["value"] for d in dims if d.get("key") == "account_id"), ""
+                )
+                arn_account = _arn_account(r.get("resource", ""))
+                # If the resource belongs to a different account than the querying
+                # account, attribute it to the resource owner (ARN account).
+                if arn_account and arn_account != dim_account:
+                    new_dims = [
+                        {"key": d["key"], "value": arn_account}
+                        if d.get("key") == "account_id"
+                        else d
+                        for d in dims
+                    ]
+                    # If no account_id dimension existed, add one
+                    if not any(d.get("key") == "account_id" for d in dims):
+                        new_dims = list(dims) + [{"key": "account_id", "value": arn_account}]
+                    r = dict(r, dimensions=new_dims)
                 results.append(r)
 
         # Recompute summary counts from the deduped result rows so that all
