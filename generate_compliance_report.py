@@ -420,16 +420,16 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
     </div>
   </div>
 
-  <!-- Chart 4: Top 10 Services by Error -->
+  <!-- Chart 4: Top 10 Compliance Programs by Fail Rate -->
   <div class="chart-card">
-    <div class="chart-title">Top 10 Services by Error Count</div>
-    <div id="chart-top-error"></div>
+    <div class="chart-title">Top 10 Compliance Programs by Fail Rate</div>
+    <div id="chart-prog-fail"></div>
   </div>
 
-  <!-- Chart 5: Top 10 Worst Pass Rate by Service -->
+  <!-- Chart 5: Worst Pass Rate by Account -->
   <div class="chart-card">
-    <div class="chart-title">Top 10 Worst Pass Rate by Service</div>
-    <div id="chart-worst-pass"></div>
+    <div class="chart-title">Pass Rate by Account</div>
+    <div id="chart-acct-pass"></div>
   </div>
 
 </div>
@@ -611,12 +611,12 @@ function drawGauge(svgId, labelId, pct) {{
   // Chart 3: Pass rate gauge
   drawGauge('chart-gauge','gauge-label', d.pass_pct);
 
-  // Chart 4: Top errors (orange tones)
-  hBar('chart-top-error', d.top_error,
-    () => '#f97316');
+  // Chart 4: Top 10 compliance programs by fail rate (red tones)
+  hBar('chart-prog-fail', d.prog_fail_rate,
+    (v) => `hsl(${{Math.round((100-v)*0.4)}},75%,52%)`);
 
-  // Chart 5: Worst pass rate — green→red gradient bar
-  hBar('chart-worst-pass', d.worst_pass_rate,
+  // Chart 5: Pass rate by account — green→red gradient
+  hBar('chart-acct-pass', d.worst_acct_pass,
     (v) => `hsl(${{Math.round(v*1.2)}},70%,50%)`);
 }})();
 
@@ -823,52 +823,79 @@ def build_chart_data(services: list[dict], controls: list[dict], root_summary: d
     """Compute all chart datasets from service summaries and controls."""
     from collections import defaultdict
 
-    svc_alarm  = defaultdict(int)
-    svc_error  = defaultdict(int)
-    svc_ok     = defaultdict(int)
-    svc_total  = defaultdict(int)
-
+    # Service-level aggregates (from service group summaries)
+    svc_alarm = defaultdict(int)
+    svc_ok    = defaultdict(int)
+    svc_total = defaultdict(int)
     for svc in services:
         n = svc["title"]
-        svc_alarm[n]  = svc["alarm"]
-        svc_error[n]  = svc["error"]
-        svc_ok[n]     = svc["ok"]
-        svc_total[n]  = svc["total"]
+        svc_alarm[n] = svc["alarm"]
+        svc_ok[n]    = svc["ok"]
+        svc_total[n] = svc["total"]
 
     # Chart 1: top 10 services by alarm
     top_alarm = sorted(svc_alarm.items(), key=lambda x: -x[1])[:10]
 
     # Chart 3: overall pass rate
-    grand     = sum(root_summary.get(s, 0) for s in STATUS_ORDER)
-    total_ok  = root_summary.get("ok", 0)
-    pass_pct  = round((total_ok / grand) * 100) if grand else 0
+    grand    = sum(root_summary.get(s, 0) for s in STATUS_ORDER)
+    pass_pct = round((root_summary.get("ok", 0) / grand) * 100) if grand else 0
 
-    # Chart 4: top 10 services by error (only non-zero)
-    top_error = sorted(
-        [(s, v) for s, v in svc_error.items() if v > 0],
+    # Chart 4: top 10 compliance programs by fail rate — computed from result rows
+    prog_alarm = defaultdict(int)
+    prog_total = defaultdict(int)
+    acct_alarm = defaultdict(int)
+    acct_ok    = defaultdict(int)
+    acct_total = defaultdict(int)
+
+    for ctrl in controls:
+        programs = ctrl.get("compliance_programs") or []
+        for r in (ctrl.get("results") or []):
+            dims   = {d["key"]: d["value"] for d in (r.get("dimensions") or [])}
+            acct   = dims.get("account_id", "")
+            status = r.get("status", "")
+            # Account stats
+            if acct and acct != "<nil>":
+                acct_total[acct] += 1
+                if status == "alarm":
+                    acct_alarm[acct] += 1
+                elif status == "ok":
+                    acct_ok[acct] += 1
+            # Program stats
+            for prog in programs:
+                prog_total[prog] += 1
+                if status in ("alarm", "error"):
+                    prog_alarm[prog] += 1
+
+    # Top 10 programs by fail rate (min 10 results to avoid noise)
+    prog_fail = sorted(
+        [
+            (PROGRAM_NAMES.get(p, p), round(prog_alarm[p] / prog_total[p] * 100))
+            for p in prog_total
+            if prog_total[p] >= 10
+        ],
         key=lambda x: -x[1]
     )[:10]
 
-    # Chart 5: top 10 worst pass rate (services with actual results only)
-    worst_pass = sorted(
+    # Chart 5: worst pass rate by account
+    worst_acct = sorted(
         [
-            (s, round((svc_ok[s] / svc_total[s]) * 100))
-            for s in svc_total
-            if svc_total[s] > 0
+            (a, round(acct_ok[a] / acct_total[a] * 100))
+            for a in acct_total
+            if acct_total[a] > 0
         ],
         key=lambda x: x[1]
-    )[:10]
+    )[:12]
 
     return {
-        "top_alarm":    top_alarm,
-        "top_error":    top_error,
-        "worst_pass_rate": worst_pass,
-        "total_alarm":  root_summary.get("alarm", 0),
-        "total_ok":     root_summary.get("ok", 0),
-        "total_error":  root_summary.get("error", 0),
-        "total_info":   root_summary.get("info", 0),
-        "total_skip":   root_summary.get("skip", 0),
-        "pass_pct":     pass_pct,
+        "top_alarm":         top_alarm,
+        "prog_fail_rate":    prog_fail,
+        "worst_acct_pass":   worst_acct,
+        "total_alarm":       root_summary.get("alarm", 0),
+        "total_ok":          root_summary.get("ok", 0),
+        "total_error":       root_summary.get("error", 0),
+        "total_info":        root_summary.get("info", 0),
+        "total_skip":        root_summary.get("skip", 0),
+        "pass_pct":          pass_pct,
     }
 
 
