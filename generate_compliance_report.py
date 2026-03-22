@@ -272,24 +272,29 @@ header p{{color:var(--muted);font-size:.875rem}}
 .summary-card.skip  .val{{color:var(--skip)}}
 .summary-card.total .val{{color:var(--accent)}}
 
-/* ── Service grid ─────────────────────────────────────────── */
-.section-title{{font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px}}
-.service-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:32px}}
-.svc-card{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;cursor:pointer;transition:border-color .15s}}
-.svc-card:hover{{border-color:var(--accent)}}
-.svc-card.active{{border-color:var(--accent);background:rgba(79,156,249,.06)}}
-.svc-card .svc-name{{font-size:.82rem;font-weight:600;color:var(--text);margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-.svc-bar{{height:4px;border-radius:99px;background:var(--surface2);overflow:hidden;margin-bottom:6px}}
-.svc-bar-fill{{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--ok),var(--accent))}}
-.svc-bar-fill.all-error{{background:var(--error)}}
-.svc-bar-fill.all-alarm{{background:var(--alarm)}}
-.svc-bar-fill.all-skip{{background:var(--skip)}}
-.svc-pills{{display:flex;gap:4px;flex-wrap:wrap}}
-.pill{{display:inline-flex;align-items:center;font-size:.66rem;font-weight:600;padding:1px 6px;border-radius:99px}}
-.pill.alarm{{background:var(--alarm-bg);color:var(--alarm)}}
-.pill.ok   {{background:var(--ok-bg);color:var(--ok)}}
-.pill.error{{background:var(--error-bg);color:var(--error)}}
-.pill.skip {{background:var(--skip-bg);color:var(--skip)}}
+/* ── Charts ───────────────────────────────────────────────── */
+.charts-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:20px;margin-bottom:32px}}
+.chart-card{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px}}
+.chart-title{{font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:16px}}
+.chart-subtitle{{font-size:.72rem;color:var(--muted);margin-top:8px;text-align:center}}
+
+/* horizontal bar chart */
+.hbar-row{{display:flex;align-items:center;gap:10px;margin-bottom:8px}}
+.hbar-label{{font-size:.75rem;color:var(--text);width:130px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}}
+.hbar-track{{flex:1;height:14px;background:var(--surface2);border-radius:4px;overflow:hidden;position:relative}}
+.hbar-fill{{height:100%;border-radius:4px;transition:width .4s ease}}
+.hbar-val{{font-size:.72rem;color:var(--muted);width:52px;text-align:left;flex-shrink:0}}
+
+/* donut */
+.donut-wrap{{display:flex;align-items:center;gap:24px;flex-wrap:wrap}}
+.donut-legend{{display:flex;flex-direction:column;gap:6px}}
+.legend-item{{display:flex;align-items:center;gap:7px;font-size:.75rem;color:var(--text)}}
+.legend-dot{{width:10px;height:10px;border-radius:50%;flex-shrink:0}}
+
+/* gauge / dial */
+.gauge-wrap{{display:flex;flex-direction:column;align-items:center}}
+.gauge-label{{font-size:2rem;font-weight:700;margin-top:-8px}}
+.gauge-sub{{font-size:.75rem;color:var(--muted);margin-top:2px}}
 
 /* ── Filters ──────────────────────────────────────────────── */
 .filters{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;margin-bottom:20px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}}
@@ -386,10 +391,47 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
   <div class="summary-card skip"> <div class="val">{total_skip}</div> <div class="lbl">Skip</div></div>
 </div>
 
-<!-- Service grid -->
-<div class="section-title">Services — click to filter</div>
-<div class="service-grid" id="service-grid">
-{service_cards}
+<!-- Charts -->
+<div class="charts-grid" id="charts-grid">
+
+  <!-- Chart 1: Top 10 Services by Alarm -->
+  <div class="chart-card">
+    <div class="chart-title">Top 10 Services by Alarm Count</div>
+    <div id="chart-top-alarm"></div>
+  </div>
+
+  <!-- Chart 2: Overall Status Donut -->
+  <div class="chart-card">
+    <div class="chart-title">Overall Status Distribution</div>
+    <div class="donut-wrap">
+      <svg id="chart-donut" width="160" height="160" viewBox="0 0 160 160"></svg>
+      <div class="donut-legend" id="donut-legend"></div>
+    </div>
+    <div class="chart-subtitle" id="donut-subtitle"></div>
+  </div>
+
+  <!-- Chart 3: Compliance pass rate gauge -->
+  <div class="chart-card">
+    <div class="chart-title">Overall Pass Rate</div>
+    <div class="gauge-wrap">
+      <svg id="chart-gauge" width="220" height="130" viewBox="0 0 220 130"></svg>
+      <div class="gauge-label" id="gauge-label"></div>
+      <div class="gauge-sub">controls passing</div>
+    </div>
+  </div>
+
+  <!-- Chart 4: Top 10 Services by Error -->
+  <div class="chart-card">
+    <div class="chart-title">Top 10 Services by Error Count</div>
+    <div id="chart-top-error"></div>
+  </div>
+
+  <!-- Chart 5: Top 10 Worst Pass Rate by Service -->
+  <div class="chart-card">
+    <div class="chart-title">Top 10 Worst Pass Rate by Service</div>
+    <div id="chart-worst-pass"></div>
+  </div>
+
 </div>
 
 <!-- Filters -->
@@ -488,23 +530,97 @@ let pageSize    = 25;
 let activeService = '';
 const STATUS_ORDER = {{alarm:0,error:1,ok:2,info:3,skip:4}};
 
-// ── Service card click ────────────────────────────────────────────────────
-document.querySelectorAll('.svc-card[data-service]').forEach(card => {{
-  card.addEventListener('click', () => {{
-    const val = card.dataset.service;
-    if (activeService === val) {{
-      activeService = '';
-      card.classList.remove('active');
-      document.getElementById('f-service').value = '';
-    }} else {{
-      document.querySelectorAll('.svc-card').forEach(c => c.classList.remove('active'));
-      card.classList.add('active');
-      activeService = val;
-      document.getElementById('f-service').value = val;
-    }}
-    applyFilters();
+// ── Chart data (injected by Python) ──────────────────────────────────────
+const CHART_DATA = {chart_data_json};
+
+// ── Charts ────────────────────────────────────────────────────────────────
+function hBar(containerId, rows, colorFn) {{
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const max = rows[0]?.[1] || 1;
+  el.innerHTML = rows.map(([label, val]) => `
+    <div class="hbar-row">
+      <div class="hbar-label" title="${{esc(label)}}">${{esc(label)}}</div>
+      <div class="hbar-track">
+        <div class="hbar-fill" style="width:${{Math.round(val/max*100)}}%;background:${{colorFn(val,max)}}"></div>
+      </div>
+      <div class="hbar-val">${{val.toLocaleString()}}</div>
+    </div>`).join('');
+}}
+
+function drawDonut(svgId, legendId, subtitleId, slices) {{
+  const svg = document.getElementById(svgId);
+  const legend = document.getElementById(legendId);
+  const sub = document.getElementById(subtitleId);
+  const cx=80, cy=80, r=60, ir=38;
+  const total = slices.reduce((s,x)=>s+x.v,0);
+  if (!total) return;
+  let angle = -Math.PI/2;
+  let paths = '';
+  slices.forEach(s => {{
+    if (!s.v) return;
+    const a = (s.v/total)*Math.PI*2;
+    const x1=cx+r*Math.cos(angle), y1=cy+r*Math.sin(angle);
+    const x2=cx+r*Math.cos(angle+a), y2=cy+r*Math.sin(angle+a);
+    const xi1=cx+ir*Math.cos(angle), yi1=cy+ir*Math.sin(angle);
+    const xi2=cx+ir*Math.cos(angle+a), yi2=cy+ir*Math.sin(angle+a);
+    const lg = a > Math.PI ? 1 : 0;
+    paths += `<path d="M${{x1}},${{y1}} A${{r}},${{r}} 0 ${{lg}},1 ${{x2}},${{y2}} L${{xi2}},${{yi2}} A${{ir}},${{ir}} 0 ${{lg}},0 ${{xi1}},${{yi1}} Z" fill="${{s.color}}" opacity=".9"/>`;
+    angle += a;
   }});
-}});
+  svg.innerHTML = paths + `<text x="${{cx}}" y="${{cy+5}}" text-anchor="middle" font-size="13" fill="#e2e8f0" font-weight="600">${{Math.round(slices.find(s=>s.label==='ok')?.v/total*100||0)}}%</text><text x="${{cx}}" y="${{cy+20}}" text-anchor="middle" font-size="9" fill="#64748b">passing</text>`;
+  legend.innerHTML = slices.filter(s=>s.v>0).map(s=>
+    `<div class="legend-item"><div class="legend-dot" style="background:${{s.color}}"></div><span>${{s.label}}: ${{s.v.toLocaleString()}}</span></div>`
+  ).join('');
+  if (sub) sub.textContent = `${{total.toLocaleString()}} total results`;
+}}
+
+function drawGauge(svgId, labelId, pct) {{
+  const svg = document.getElementById(svgId);
+  const label = document.getElementById(labelId);
+  const cx=110, cy=110, r=90;
+  const startA = Math.PI, sweep = Math.PI;
+  const fillA = sweep * (pct/100);
+  const x1=cx+r*Math.cos(startA), y1=cy+r*Math.sin(startA);
+  const x2=cx+r*Math.cos(startA+fillA), y2=cy+r*Math.sin(startA+fillA);
+  const lg = fillA > Math.PI ? 1 : 0;
+  const color = pct >= 70 ? '#22c55e' : pct >= 40 ? '#f59e0b' : '#ef4444';
+  svg.innerHTML =
+    `<path d="M${{cx+r*Math.cos(startA)}},${{cy+r*Math.sin(startA)}} A${{r}},${{r}} 0 0,1 ${{cx-r}},${{cy}}" fill="none" stroke="#22263a" stroke-width="16" stroke-linecap="round"/>` +
+    (pct > 0 ? `<path d="M${{x1}},${{y1}} A${{r}},${{r}} 0 ${{lg}},1 ${{x2}},${{y2}}" fill="none" stroke="${{color}}" stroke-width="16" stroke-linecap="round"/>` : '');
+  label.style.color = color;
+  label.textContent = pct + '%';
+}}
+
+(function initCharts() {{
+  const d = CHART_DATA;
+
+  // Chart 1: Top alarms (horizontal bar, alarm gradient)
+  hBar('chart-top-alarm', d.top_alarm,
+    (v,m) => `hsl(${{Math.round((1-v/m)*30)}},80%,55%)`);
+
+  // Chart 2: Donut — overall status
+  drawDonut('chart-donut','donut-legend','donut-subtitle',[
+    {{label:'alarm', v:d.total_alarm, color:'#ef4444'}},
+    {{label:'error', v:d.total_error, color:'#f97316'}},
+    {{label:'ok',    v:d.total_ok,    color:'#22c55e'}},
+    {{label:'info',  v:d.total_info,  color:'#38bdf8'}},
+    {{label:'skip',  v:d.total_skip,  color:'#475569'}},
+  ]);
+
+  // Chart 3: Pass rate gauge
+  drawGauge('chart-gauge','gauge-label', d.pass_pct);
+
+  // Chart 4: Top errors (orange tones)
+  hBar('chart-top-error', d.top_error,
+    () => '#f97316');
+
+  // Chart 5: Worst pass rate — green→red gradient bar
+  hBar('chart-worst-pass', d.worst_pass_rate,
+    (v) => `hsl(${{Math.round(v*1.2)}},70%,50%)`);
+}})();
+
+// ── Service filter (dropdown only — no card grid) ─────────────────────────
 
 // ── Sort ──────────────────────────────────────────────────────────────────
 document.querySelectorAll('th[data-col]').forEach(th => {{
@@ -526,9 +642,6 @@ document.querySelectorAll('th[data-col]').forEach(th => {{
   el.addEventListener(id === 'f-search' ? 'input' : 'change', () => {{
     if (id === 'f-service') {{
       activeService = el.value;
-      document.querySelectorAll('.svc-card').forEach(c => {{
-        c.classList.toggle('active', c.dataset.service === activeService && activeService !== '');
-      }});
     }}
     applyFilters();
   }});
@@ -569,7 +682,6 @@ function resetFilters() {{
   document.getElementById('f-pagesize').value = '25';
   pageSize = 25;
   activeService = '';
-  document.querySelectorAll('.svc-card').forEach(c => c.classList.remove('active'));
   filtered = [...CONTROLS];
   currentPage = 1;
   render();
@@ -703,52 +815,61 @@ applyFilters();
 </html>"""
 
 
-SVC_CARD_TEMPLATE = """\
-<div class="svc-card" data-service="{name}">
-  <div class="svc-name" title="{name}">{name}</div>
-  <div class="svc-bar"><div class="svc-bar-fill{bar_class}" style="width:{pass_pct}%"></div></div>
-  <div class="svc-pills">{pills}</div>
-</div>"""
-
-
-def build_service_cards(services: list[dict]) -> str:
-    cards = []
-    for svc in services:
-        pct   = svc["pass_pct"] if svc["pass_pct"] is not None else 0
-        total = svc["total"]
-
-        if total == 0:
-            bar_class = " all-skip"
-        elif svc["error"] > 0 and svc["alarm"] == 0 and svc["ok"] == 0:
-            bar_class = " all-error"
-        elif pct == 0:
-            bar_class = " all-alarm"
-        else:
-            bar_class = ""
-
-        pills = []
-        if svc["alarm"]:
-            pills.append(f'<span class="pill alarm">{svc["alarm"]}</span>')
-        if svc["ok"]:
-            pills.append(f'<span class="pill ok">{svc["ok"]}</span>')
-        if svc["error"]:
-            pills.append(f'<span class="pill error">{svc["error"]} err</span>')
-        if svc["skip"]:
-            pills.append(f'<span class="pill skip">{svc["skip"]} skip</span>')
-        if not pills:
-            pills.append('<span class="pill skip">—</span>')
-
-        cards.append(SVC_CARD_TEMPLATE.format(
-            name=svc["title"],
-            pass_pct=pct,
-            bar_class=bar_class,
-            pills="".join(pills),
-        ))
-    return "\n".join(cards)
-
-
 def build_options(values: list) -> str:
     return "\n".join(f'<option value="{v}">{v}</option>' for v in sorted(values) if v)
+
+
+def build_chart_data(services: list[dict], controls: list[dict], root_summary: dict) -> dict:
+    """Compute all chart datasets from service summaries and controls."""
+    from collections import defaultdict
+
+    svc_alarm  = defaultdict(int)
+    svc_error  = defaultdict(int)
+    svc_ok     = defaultdict(int)
+    svc_total  = defaultdict(int)
+
+    for svc in services:
+        n = svc["title"]
+        svc_alarm[n]  = svc["alarm"]
+        svc_error[n]  = svc["error"]
+        svc_ok[n]     = svc["ok"]
+        svc_total[n]  = svc["total"]
+
+    # Chart 1: top 10 services by alarm
+    top_alarm = sorted(svc_alarm.items(), key=lambda x: -x[1])[:10]
+
+    # Chart 3: overall pass rate
+    grand     = sum(root_summary.get(s, 0) for s in STATUS_ORDER)
+    total_ok  = root_summary.get("ok", 0)
+    pass_pct  = round((total_ok / grand) * 100) if grand else 0
+
+    # Chart 4: top 10 services by error (only non-zero)
+    top_error = sorted(
+        [(s, v) for s, v in svc_error.items() if v > 0],
+        key=lambda x: -x[1]
+    )[:10]
+
+    # Chart 5: top 10 worst pass rate (services with actual results only)
+    worst_pass = sorted(
+        [
+            (s, round((svc_ok[s] / svc_total[s]) * 100))
+            for s in svc_total
+            if svc_total[s] > 0
+        ],
+        key=lambda x: x[1]
+    )[:10]
+
+    return {
+        "top_alarm":    top_alarm,
+        "top_error":    top_error,
+        "worst_pass_rate": worst_pass,
+        "total_alarm":  root_summary.get("alarm", 0),
+        "total_ok":     root_summary.get("ok", 0),
+        "total_error":  root_summary.get("error", 0),
+        "total_info":   root_summary.get("info", 0),
+        "total_skip":   root_summary.get("skip", 0),
+        "pass_pct":     pass_pct,
+    }
 
 
 def generate_html(data: dict, account_id: str) -> str:
@@ -759,12 +880,13 @@ def generate_html(data: dict, account_id: str) -> str:
     service_names = [s["title"] for s in services]
     account_ids   = sorted(set(a for c in controls for a in c["account_ids"]))
     region_ids    = sorted(set(r for c in controls for r in c["regions"]))
-    # Collect unique program keys and map to display names for the dropdown.
     program_keys  = sorted(set(p for c in controls for p in c["compliance_programs"]))
     program_options = "\n".join(
         f'<option value="{k}">{PROGRAM_NAMES.get(k, k)}</option>'
         for k in program_keys
     )
+
+    chart_data = build_chart_data(services, controls, root_summary)
 
     title = data.get("groups", [{}])[0].get("title", "AWS Compliance")
     generated = datetime.now().strftime("%B %d, %Y at %H:%M")
@@ -779,13 +901,13 @@ def generate_html(data: dict, account_id: str) -> str:
         total_error=root_summary.get("error", 0),
         total_info=root_summary.get("info", 0),
         total_skip=root_summary.get("skip", 0),
-        service_cards=build_service_cards(services),
         service_options="\n".join(
             f'<option value="{s}">{s}</option>' for s in service_names
         ),
         program_options=program_options,
         account_options=build_options(account_ids),
         region_options=build_options(region_ids),
+        chart_data_json=json.dumps(chart_data, separators=(",", ":")),
         controls_json=json.dumps(controls, separators=(",", ":")),
     )
 
