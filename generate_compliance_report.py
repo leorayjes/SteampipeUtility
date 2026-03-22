@@ -91,22 +91,40 @@ PROGRAM_NAMES: dict[str, str] = {
 
 
 def extract_service_groups(data: dict) -> list[dict]:
-    """Return the service-level groups (depth 2) with summaries."""
+    """Return service-level group titles and ordering from the JSON tree.
+    Actual summary counts are recomputed from deduped controls in generate_html()."""
     try:
-        groups = data["groups"][0]["groups"]
+        return [{"title": g.get("title", "")} for g in data["groups"][0]["groups"]]
     except (KeyError, IndexError):
-        LOGGER.warning("Could not locate service groups in JSON.")
         return []
 
+
+def compute_service_summaries(service_titles: list[dict], controls: list[dict]) -> list[dict]:
+    """Build service summaries recomputed from the already-deduped control list."""
+    from collections import defaultdict
+    svc_alarm  = defaultdict(int)
+    svc_ok     = defaultdict(int)
+    svc_error  = defaultdict(int)
+    svc_info   = defaultdict(int)
+    svc_skip   = defaultdict(int)
+
+    for c in controls:
+        s = c["service"]
+        svc_alarm[s]  += c["alarm"]
+        svc_ok[s]     += c["ok"]
+        svc_error[s]  += c["error"]
+        svc_info[s]   += c["info"]
+        svc_skip[s]   += c["skip"]
+
     services = []
-    for group in groups:
-        summary = group.get("summary", {}).get("status", {})
-        total   = sum(summary.get(s, 0) for s in STATUS_ORDER)
-        ok      = summary.get("ok", 0)
-        alarm   = summary.get("alarm", 0)
-        error   = summary.get("error", 0)
-        info    = summary.get("info", 0)
-        skip    = summary.get("skip", 0)
+    for entry in service_titles:
+        n     = entry["title"]
+        alarm = svc_alarm[n]
+        ok    = svc_ok[n]
+        error = svc_error[n]
+        info  = svc_info[n]
+        skip  = svc_skip[n]
+        total = alarm + ok + error + info + skip
         pass_pct = round((ok / total) * 100) if total > 0 else None
 
         if error > 0:
@@ -121,7 +139,7 @@ def extract_service_groups(data: dict) -> list[dict]:
             status = "skip"
 
         services.append({
-            "title":    group.get("title", ""),
+            "title":    n,
             "status":   status,
             "alarm":    alarm,
             "ok":       ok,
@@ -131,7 +149,6 @@ def extract_service_groups(data: dict) -> list[dict]:
             "total":    total,
             "pass_pct": pass_pct,
         })
-
     return services
 
 
@@ -150,17 +167,41 @@ def extract_controls(data: dict) -> list[dict]:
 
 def _walk(node: dict, service: str, controls: list) -> None:
     for ctrl in (node.get("controls") or []):
-        summary  = ctrl.get("summary") or {}
-        results  = ctrl.get("results") or []
         ctrl_svc = (ctrl.get("tags") or {}).get("service", service or "Unknown")
         severity = ctrl.get("severity") or ""
 
-        total = sum(summary.get(s, 0) for s in STATUS_ORDER)
-        alarm = summary.get("alarm", 0)
-        ok    = summary.get("ok", 0)
-        error = summary.get("error", 0)
-        info  = summary.get("info", 0)
-        skip  = summary.get("skip", 0)
+        # Deduplicate result rows by (resource, status) within this control.
+        # The same resource can appear once per compliance framework it belongs
+        # to, or once per member account that sees a shared payer-account resource.
+        # Deduplication produces one row per unique resource outcome.
+        raw_results = ctrl.get("results") or []
+        seen_keys: set = set()
+        results: list = []
+        for r in raw_results:
+            key = (r.get("resource", ""), r.get("status", ""))
+            if key not in seen_keys:
+                seen_keys.add(key)
+                results.append(r)
+
+        # Recompute summary counts from the deduped result rows so that all
+        # figures (table, charts, summaries) reflect deduplicated reality.
+        alarm = sum(1 for r in results if r.get("status") == "alarm")
+        ok    = sum(1 for r in results if r.get("status") == "ok")
+        error = sum(1 for r in results if r.get("status") == "error")
+        info  = sum(1 for r in results if r.get("status") == "info")
+        skip  = sum(1 for r in results if r.get("status") == "skip")
+        total = alarm + ok + error + info + skip
+
+        # Fall back to the JSON summary when there are no result rows
+        # (controls that ran but produced no individual rows).
+        if total == 0:
+            summary = ctrl.get("summary") or {}
+            alarm = summary.get("alarm", 0)
+            ok    = summary.get("ok", 0)
+            error = summary.get("error", 0)
+            info  = summary.get("info", 0)
+            skip  = summary.get("skip", 0)
+            total = alarm + ok + error + info + skip
 
         pass_pct = round((ok / total) * 100) if total > 0 else None
 
@@ -1000,9 +1041,24 @@ def build_chart_data(services: list[dict], controls: list[dict], root_summary: d
 
 
 def generate_html(data: dict, account_id: str) -> str:
-    root_summary = data.get("summary", {}).get("status", {})
-    services = extract_service_groups(data)
-    controls = extract_controls(data)
+    # Extract service titles (for ordering) and deduped controls
+    service_titles = extract_service_groups(data)
+    controls       = extract_controls(data)
+
+    # Recompute service summaries and root summary from deduped controls
+    services = compute_service_summaries(service_titles, controls)
+    deduped_alarm = sum(c["alarm"] for c in controls)
+    deduped_ok    = sum(c["ok"]    for c in controls)
+    deduped_error = sum(c["error"] for c in controls)
+    deduped_info  = sum(c["info"]  for c in controls)
+    deduped_skip  = sum(c["skip"]  for c in controls)
+    deduped_summary = {
+        "alarm": deduped_alarm,
+        "ok":    deduped_ok,
+        "error": deduped_error,
+        "info":  deduped_info,
+        "skip":  deduped_skip,
+    }
 
     service_names = [s["title"] for s in services]
     account_ids   = sorted(set(a for c in controls for a in c["account_ids"]))
@@ -1013,7 +1069,7 @@ def generate_html(data: dict, account_id: str) -> str:
         for k in program_keys
     )
 
-    chart_data = build_chart_data(services, controls, root_summary)
+    chart_data = build_chart_data(services, controls, deduped_summary)
 
     title = data.get("groups", [{}])[0].get("title", "AWS Compliance")
     generated = datetime.now().strftime("%B %d, %Y at %H:%M")
@@ -1023,11 +1079,11 @@ def generate_html(data: dict, account_id: str) -> str:
         generated=generated,
         account_id=account_id,
         total_controls=len(controls),
-        total_alarm=root_summary.get("alarm", 0),
-        total_ok=root_summary.get("ok", 0),
-        total_error=root_summary.get("error", 0),
-        total_info=root_summary.get("info", 0),
-        total_skip=root_summary.get("skip", 0),
+        total_alarm=deduped_alarm,
+        total_ok=deduped_ok,
+        total_error=deduped_error,
+        total_info=deduped_info,
+        total_skip=deduped_skip,
         service_options="\n".join(
             f'<option value="{s}">{s}</option>' for s in service_names
         ),
