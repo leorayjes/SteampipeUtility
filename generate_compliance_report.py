@@ -50,6 +50,45 @@ def parse_args() -> argparse.Namespace:
 
 STATUS_ORDER = ["alarm", "error", "ok", "info", "skip"]
 
+# Meta tags that are not compliance programs.
+_META_TAGS = {"category", "plugin", "service", "type"}
+
+# Canonical display names for compliance program tag keys.
+PROGRAM_NAMES: dict[str, str] = {
+    "acsc_essential_eight":                  "ACSC Essential Eight",
+    "acsc_essential_eight_ml_3":             "ACSC Essential Eight ML3",
+    "audit_manager_control_tower":           "Audit Manager Control Tower",
+    "cis_controls_v8_ig1":                   "CIS Controls v8 IG1",
+    "cis_v120":                              "CIS v1.2.0",
+    "cis_v130":                              "CIS v1.3.0",
+    "cis_v140":                              "CIS v1.4.0",
+    "cis_v150":                              "CIS v1.5.0",
+    "cis_v200":                              "CIS v2.0.0",
+    "cis_v300":                              "CIS v3.0.0",
+    "cis_v400":                              "CIS v4.0.0",
+    "cisa_cyber_essentials":                 "CISA Cyber Essentials",
+    "fedramp_low_rev_4":                     "FedRAMP Low Rev 4",
+    "fedramp_moderate_rev_4":                "FedRAMP Moderate Rev 4",
+    "ffiec":                                 "FFIEC",
+    "gdpr":                                  "GDPR",
+    "gxp_21_cfr_part_11":                   "GxP 21 CFR Part 11",
+    "gxp_eu_annex_11":                      "GxP EU Annex 11",
+    "hipaa_final_omnibus_security_rule_2013":"HIPAA Final Omnibus 2013",
+    "hipaa_security_rule_2003":              "HIPAA Security Rule 2003",
+    "nist_800_171_rev_2":                   "NIST 800-171 Rev 2",
+    "nist_800_53_rev_4":                    "NIST 800-53 Rev 4",
+    "nist_800_53_rev_5":                    "NIST 800-53 Rev 5",
+    "nist_csf":                             "NIST CSF v1.1",
+    "nist_csf_v2":                          "NIST CSF v2.0",
+    "nydfs_23":                             "NYDFS 23 NYCRR 500",
+    "nydfs_23_common_tags":                 "NYDFS 23 (Common)",
+    "pci_dss_v321":                         "PCI DSS v3.2.1",
+    "pci_dss_v40":                          "PCI DSS v4.0",
+    "rbi_cyber_security":                   "RBI Cyber Security",
+    "rbi_itf_nbfc":                         "RBI ITF NBFC",
+    "soc_2":                                "SOC 2",
+}
+
 
 def extract_service_groups(data: dict) -> list[dict]:
     """Return the service-level groups (depth 2) with summaries."""
@@ -150,24 +189,30 @@ def _walk(node: dict, service: str, controls: list) -> None:
             if d.get("key") == "region" and d.get("value")
         ))
 
+        compliance_programs = sorted(
+            k for k, v in (ctrl.get("tags") or {}).items()
+            if k not in _META_TAGS and v == "true"
+        )
+
         controls.append({
-            "id":          ctrl.get("control_id", ""),
-            "title":       ctrl.get("title", ""),
-            "description": ctrl.get("description", ""),
-            "service":     service,
-            "ctrl_service":ctrl_svc,
-            "severity":    severity,
-            "status":      ctrl_status,
-            "alarm":       alarm,
-            "ok":          ok,
-            "error":       error,
-            "info":        info,
-            "skip":        skip,
-            "total":       total,
-            "pass_pct":    pass_pct,
-            "results":     results,
-            "account_ids": account_ids,
-            "regions":     regions,
+            "id":                  ctrl.get("control_id", ""),
+            "title":               ctrl.get("title", ""),
+            "description":         ctrl.get("description", ""),
+            "service":             service,
+            "ctrl_service":        ctrl_svc,
+            "severity":            severity,
+            "status":              ctrl_status,
+            "alarm":               alarm,
+            "ok":                  ok,
+            "error":               error,
+            "info":                info,
+            "skip":                skip,
+            "total":               total,
+            "pass_pct":            pass_pct,
+            "results":             results,
+            "account_ids":         account_ids,
+            "regions":             regions,
+            "compliance_programs": compliance_programs,
         })
 
     for group in (node.get("groups") or []):
@@ -372,6 +417,13 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
     </select>
   </div>
   <div class="filter-group">
+    <label>Compliance Program</label>
+    <select id="f-program">
+      <option value="">All programs</option>
+      {program_options}
+    </select>
+  </div>
+  <div class="filter-group">
     <label>Account ID</label>
     <select id="f-account">
       <option value="">All accounts</option>
@@ -469,7 +521,7 @@ document.querySelectorAll('th[data-col]').forEach(th => {{
 }});
 
 // ── Filters ───────────────────────────────────────────────────────────────
-['f-search','f-status','f-service','f-account','f-region','f-pagesize'].forEach(id => {{
+['f-search','f-status','f-service','f-program','f-account','f-region','f-pagesize'].forEach(id => {{
   const el = document.getElementById(id);
   el.addEventListener(id === 'f-search' ? 'input' : 'change', () => {{
     if (id === 'f-service') {{
@@ -486,16 +538,18 @@ function applyFilters() {{
   const search  = document.getElementById('f-search').value.toLowerCase().trim();
   const status  = document.getElementById('f-status').value;
   const service = document.getElementById('f-service').value;
+  const program = document.getElementById('f-program').value;
   const account = document.getElementById('f-account').value;
   const region  = document.getElementById('f-region').value;
   pageSize = parseInt(document.getElementById('f-pagesize').value) || 0;
   currentPage = 1;
 
   filtered = CONTROLS.filter(c => {{
-    if (status  && c.status  !== status)               return false;
-    if (service && c.service !== service)               return false;
-    if (account && !c.account_ids.includes(account))   return false;
-    if (region  && !c.regions.includes(region))        return false;
+    if (status  && c.status  !== status)                         return false;
+    if (service && c.service !== service)                        return false;
+    if (program && !c.compliance_programs.includes(program))     return false;
+    if (account && !c.account_ids.includes(account))             return false;
+    if (region  && !c.regions.includes(region))                  return false;
     if (search) {{
       const hay = (c.title + ' ' + c.id + ' ' + c.description + ' ' + c.service).toLowerCase();
       if (!hay.includes(search)) return false;
@@ -509,6 +563,7 @@ function resetFilters() {{
   document.getElementById('f-search').value   = '';
   document.getElementById('f-status').value   = '';
   document.getElementById('f-service').value  = '';
+  document.getElementById('f-program').value  = '';
   document.getElementById('f-account').value  = '';
   document.getElementById('f-region').value   = '';
   document.getElementById('f-pagesize').value = '25';
@@ -704,6 +759,12 @@ def generate_html(data: dict, account_id: str) -> str:
     service_names = [s["title"] for s in services]
     account_ids   = sorted(set(a for c in controls for a in c["account_ids"]))
     region_ids    = sorted(set(r for c in controls for r in c["regions"]))
+    # Collect unique program keys and map to display names for the dropdown.
+    program_keys  = sorted(set(p for c in controls for p in c["compliance_programs"]))
+    program_options = "\n".join(
+        f'<option value="{k}">{PROGRAM_NAMES.get(k, k)}</option>'
+        for k in program_keys
+    )
 
     title = data.get("groups", [{}])[0].get("title", "AWS Compliance")
     generated = datetime.now().strftime("%B %d, %Y at %H:%M")
@@ -722,6 +783,7 @@ def generate_html(data: dict, account_id: str) -> str:
         service_options="\n".join(
             f'<option value="{s}">{s}</option>' for s in service_names
         ),
+        program_options=program_options,
         account_options=build_options(account_ids),
         region_options=build_options(region_ids),
         controls_json=json.dumps(controls, separators=(",", ":")),
