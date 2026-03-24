@@ -350,6 +350,16 @@ for m in c['mods']:
     print(m.get('namespace', m['id']))
 ")
 
+# Optional post-processing report scripts (empty string = none for that mod).
+MOD_REPORT_SCRIPTS=()
+while IFS= read -r line; do MOD_REPORT_SCRIPTS+=("$line"); done < <(python3 -c "
+import json
+with open('$MODS_CONFIG') as f:
+    c = json.load(f)
+for m in c['mods']:
+    print(m.get('report_script', ''))
+")
+
 # SELECTED_BENCHMARK_ID is set by select_benchmark() and consumed by run_mod().
 SELECTED_BENCHMARK_ID=""
 
@@ -424,6 +434,7 @@ run_mod() {
     local mod_name="${MOD_NAMES[$index]}"
     local mod_path="${MOD_PATHS[$index]}"
     local mod_namespace="${MOD_NAMESPACES[$index]}"
+    local report_script="${MOD_REPORT_SCRIPTS[$index]}"
     # Construct the fully-qualified benchmark name using the powerpipe namespace.
     local benchmark="${mod_namespace}.benchmark.${SELECTED_BENCHMARK_ID}"
     local supports_html="${MOD_HTML[$index]}"
@@ -483,6 +494,27 @@ run_mod() {
         log "Benchmark complete — findings were reported (exit code: $benchmark_exit)."
     fi
     log "Results saved to $run_dir/"
+
+    # If a report script is configured for this mod and a JSON export was produced,
+    # automatically generate the custom HTML report.
+    if [[ -n "$report_script" && "$supports_json" == "true" ]]; then
+        local json_file="${output_base}.json"
+        local report_file="${output_base}_report.html"
+        if [[ -f "$json_file" ]]; then
+            log "Generating report: $report_script ..."
+            set +e
+            python "$report_script" "$json_file" --output "$report_file"
+            local report_exit=$?
+            set -e
+            if (( report_exit == 0 )); then
+                log "Report generated: $report_file"
+            else
+                warn "Report generation failed (exit code: $report_exit). The raw JSON/HTML exports are still available."
+            fi
+        else
+            warn "Expected JSON export not found at $json_file — skipping report generation."
+        fi
+    fi
 
     # Optionally launch the dashboard server.
     # mod_work_dir is intentionally kept alive while the server is running

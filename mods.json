@@ -49,7 +49,8 @@
       ],
       "supports_html": true,
       "supports_json": true,
-      "supports_dashboard": true
+      "supports_dashboard": true,
+      "report_script": "generate_compliance_report.py"
     },
     {
       "id": "aws_well_architected",
@@ -62,7 +63,8 @@
       ],
       "supports_html": true,
       "supports_json": true,
-      "supports_dashboard": true
+      "supports_dashboard": true,
+      "report_script": "generate_well_architected_report.py"
     },
     {
       "id": "aws_top10",
@@ -85,7 +87,8 @@
       ],
       "supports_html": true,
       "supports_json": true,
-      "supports_dashboard": true
+      "supports_dashboard": true,
+      "report_script": "generate_top10_report.py"
     },
     {
       "id": "aws_perimeter",
