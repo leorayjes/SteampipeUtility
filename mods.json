@@ -49,7 +49,7 @@
       ],
       "supports_html": true,
       "supports_json": true,
-      "supports_dashboard": false,
+      "supports_dashboard": true,
       "report_script": "generate_compliance_report.py"
     },
     {
@@ -63,7 +63,7 @@
       ],
       "supports_html": true,
       "supports_json": true,
-      "supports_dashboard": false,
+      "supports_dashboard": true,
       "report_script": "generate_well_architected_report.py"
     },
     {
@@ -87,7 +87,7 @@
       ],
       "supports_html": true,
       "supports_json": true,
-      "supports_dashboard": false,
+      "supports_dashboard": true,
       "report_script": "generate_top10_report.py"
     },
     {
@@ -103,7 +103,7 @@
       ],
       "supports_html": true,
       "supports_json": true,
-      "supports_dashboard": false,
+      "supports_dashboard": true,
       "report_script": "generate_perimeter_report.py"
     }
   ]
