@@ -459,6 +459,21 @@ run_mod() {
     log "Installing mod: $mod_path"
     (cd "$mod_work_dir" && powerpipe mod install "$mod_path")
 
+    # Resolve the path to the installed mod's own directory so that
+    # powerpipe server can serve its benchmarks as an interactive UI.
+    # powerpipe mod install unpacks the mod under:
+    #   $mod_work_dir/.powerpipe/mods/<github-path>@<version>/
+    # We locate it by finding the mod.pp that belongs to the installed mod
+    # (not the wrapper mod.pp in $mod_work_dir).
+    local installed_mod_dir
+    installed_mod_dir=$(find "$mod_work_dir/.powerpipe/mods" -name "mod.pp" 2>/dev/null | head -1 | xargs -I{} dirname {})
+    if [[ -z "$installed_mod_dir" ]]; then
+        warn "Could not locate installed mod directory under $mod_work_dir — falling back to wrapper dir for dashboard."
+        installed_mod_dir="$mod_work_dir"
+    else
+        log "Installed mod directory: $installed_mod_dir"
+    fi
+
     # Run benchmark and export results.
     log "Running benchmark..."
 
@@ -538,10 +553,15 @@ run_mod() {
                 local dashboard_log="${run_dir}/${PAYER_ACCOUNT_ID}_${mod_id}_dashboard.log"
 
                 log "Starting Powerpipe dashboard server..."
+                # Run the server from the installed mod's own directory so that
+                # Powerpipe can discover and serve its benchmarks as an interactive UI.
                 # Redirect all server output to a log file to keep this terminal clean.
-                (cd "$mod_work_dir" && powerpipe server > "$dashboard_log" 2>&1) &
+                (cd "$installed_mod_dir" && powerpipe server \
+                    --pipes-host localhost \
+                    > "$dashboard_log" 2>&1) &
                 POWERPIPE_SERVER_PID=$!
-                # Save the working dir so cleanup can remove it when the server stops.
+                # Save the top-level working dir so cleanup can remove the whole
+                # .powerpipe/ tree (including the installed mod) when the server stops.
                 DASHBOARD_MOD_DIR="$mod_work_dir"
 
                 echo
