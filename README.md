@@ -42,6 +42,10 @@ Your AWS credentials (SSO session)
 - **Benchmarks are config-driven.** `mods.json` defines which mods
   and benchmarks are available. Adding a new benchmark requires only
   a JSON edit — no code changes.
+- **Reports are auto-generated.** For supported mods, a custom HTML
+  report is generated automatically from the JSON export once the
+  benchmark completes. The report script for each mod is declared in
+  `mods.json` via `report_script`.
 
 ---
 
@@ -65,6 +69,10 @@ Your AWS credentials (SSO session)
 ├── run_steampipe_audit.sh              # Main entrypoint — run this
 ├── install_dependencies.sh             # Installs Steampipe, Powerpipe, plugins
 ├── generate_steampipe_connections.py   # Generates ~/.steampipe/config/aws.spc
+├── generate_compliance_report.py       # HTML report generator for AWS Compliance
+├── generate_well_architected_report.py # HTML report generator for Well-Architected
+├── generate_top10_report.py            # HTML report generator for Top 10
+├── generate_perimeter_report.py        # HTML report generator for AWS Perimeter
 ├── mods.json                           # Available mods and benchmarks (config)
 ├── healthcheck_collector_role.yaml     # CloudFormation template for the IAM role
 ├── requirements.txt                    # Python dependencies (boto3)
@@ -255,12 +263,29 @@ results/
     <payer_account_id>_<mod_id>_<timestamp>.json
     <payer_account_id>_<mod_id>_<timestamp>.html
     <payer_account_id>_<mod_id>_<timestamp>.log
-    <payer_account_id>_<mod_id>_dashboard.log   ← only if dashboard launched
+    <payer_account_id>_<mod_id>_<timestamp>_report.html  ← custom report (supported mods)
+    <payer_account_id>_<mod_id>_dashboard.log            ← only if dashboard launched
 ```
 
 JSON and HTML outputs are only written for mods that support them
 (all current mods do). The `.log` file captures the full terminal
 output of the benchmark run.
+
+For mods with a `report_script` defined in `mods.json`, a custom
+styled HTML report (`_report.html`) is generated automatically from
+the JSON export immediately after the benchmark finishes. All four
+current mods produce a report:
+
+| Mod | Report script |
+|---|---|
+| AWS Compliance | `generate_compliance_report.py` |
+| AWS Well-Architected | `generate_well_architected_report.py` |
+| AWS Top 10 | `generate_top10_report.py` |
+| AWS Perimeter | `generate_perimeter_report.py` |
+
+Reports are self-contained single-file HTML pages with filterable
+tables, sortable columns, interactive charts, and expandable per-resource
+result rows. No server or internet connection is required to view them.
 
 ---
 
@@ -322,13 +347,18 @@ To add a new mod:
   ],
   "supports_html": true,
   "supports_json": true,
-  "supports_dashboard": true
+  "supports_dashboard": true,
+  "report_script": "generate_my_mod_report.py"
 }
 ```
 
 > **Important:** `namespace` must match the prefix shown by
 > `powerpipe benchmark list` (e.g. `aws_top_10`, not `aws_top10`).
 > If they differ, set `namespace` explicitly.
+
+> **`report_script`** is optional. Omit it (or leave it out entirely)
+> if no custom report generator exists for the mod. The benchmark will
+> still run and produce the standard Powerpipe JSON/HTML output.
 
 ---
 
