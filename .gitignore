@@ -169,3 +169,5 @@ reports/*
 
 # Mac specific files
 .DS_Store
+
+*_ROLE.yaml
