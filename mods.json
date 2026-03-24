@@ -50,60 +50,7 @@
       "supports_html": true,
       "supports_json": true,
       "supports_dashboard": true,
-      "report_script": "generate_compliance_report.py"
-    },
-    {
-      "id": "aws_well_architected",
-      "namespace": "aws_well_architected",
-      "name": "AWS Well-Architected",
-      "description": "AWS Well-Architected Framework checks across all pillars",
-      "mod": "github.com/turbot/steampipe-mod-aws-well-architected",
-      "benchmarks": [
-        { "id": "well_architected_framework", "name": "Well-Architected Framework (All Pillars)" }
-      ],
-      "supports_html": true,
-      "supports_json": true,
-      "supports_dashboard": true,
-      "report_script": "generate_well_architected_report.py"
-    },
-    {
-      "id": "aws_top10",
-      "namespace": "aws_top_10",
-      "name": "AWS Top 10 Security Checks",
-      "description": "High-signal focused set of critical security findings",
-      "mod": "github.com/turbot/steampipe-mod-aws-top-10",
-      "benchmarks": [
-        { "id": "account_security",                                  "name": "Account Security (All Top 10)" },
-        { "id": "account_security_accurate_account_info",            "name": "1. Accurate account information" },
-        { "id": "account_security_use_mfa",                          "name": "2. Use multi-factor authentication (MFA)" },
-        { "id": "account_security_no_hardcoded_secrets",             "name": "3. No hard-coding secrets" },
-        { "id": "account_security_limit_security_groups",            "name": "4. Limit security groups" },
-        { "id": "account_security_intentional_data_policies",        "name": "5. Intentional data policies" },
-        { "id": "account_security_centralize_cloudtrail_logs",       "name": "6. Centralize CloudTrail logs" },
-        { "id": "account_security_validate_iam_roles",               "name": "7. Validate IAM roles" },
-        { "id": "account_security_take_action_on_findings",          "name": "8. Take action on findings" },
-        { "id": "account_security_rotate_keys",                      "name": "9. Rotate keys" },
-        { "id": "account_security_dev_cycle",                        "name": "10. Be involved in the dev cycle" }
-      ],
-      "supports_html": true,
-      "supports_json": true,
-      "supports_dashboard": true,
-      "report_script": "generate_top10_report.py"
-    },
-    {
-      "id": "aws_perimeter",
-      "namespace": "aws_perimeter",
-      "name": "AWS Perimeter",
-      "description": "Public exposure and network perimeter checks",
-      "mod": "github.com/turbot/steampipe-mod-aws-perimeter",
-      "benchmarks": [
-        { "id": "public_access",  "name": "Public Access" },
-        { "id": "network_access", "name": "Network Access" },
-        { "id": "shared_access",  "name": "Shared Access" }
-      ],
-      "supports_html": true,
-      "supports_json": true,
-      "supports_dashboard": true
+      "report_script": "generate_perimeter_report.py"
     }
   ]
 }

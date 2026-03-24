@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-generate_compliance_report.py
+generate_perimeter_report.py
 
 Generates a self-contained, filterable HTML report from a
-Powerpipe AWS Compliance JSON benchmark result file.
+Powerpipe AWS Perimeter JSON benchmark result file.
 
 Usage:
-    python generate_compliance_report.py <path-to-result.json> [--output report.html]
+    python generate_perimeter_report.py <path-to-result.json> [--output report.html]
 """
 
 import argparse
@@ -33,13 +33,13 @@ LOGGER = logging.getLogger(__name__)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate a styled HTML report from an AWS Compliance benchmark JSON."
+        description="Generate a styled HTML report from an AWS Perimeter benchmark JSON."
     )
     parser.add_argument("input", help="Path to the benchmark result JSON file.")
     parser.add_argument(
         "--output", "-o",
         default=None,
-        help="Output HTML file path. Defaults to reports/aws_compliance.html.",
+        help="Output HTML file path. Defaults to reports/aws_perimeter.html.",
     )
     return parser.parse_args()
 
@@ -50,158 +50,45 @@ def parse_args() -> argparse.Namespace:
 
 STATUS_ORDER = ["alarm", "error", "ok", "info", "skip"]
 
-# Meta tags that are not compliance programs.
+# Tags that are metadata, not dimensions we care about.
 _META_TAGS = {"category", "plugin", "service", "type"}
 
-# Canonical display names for compliance program tag keys.
-PROGRAM_NAMES: dict[str, str] = {
-    "acsc_essential_eight":                  "ACSC Essential Eight",
-    "acsc_essential_eight_ml_3":             "ACSC Essential Eight ML3",
-    "audit_manager_control_tower":           "Audit Manager Control Tower",
-    "cis_controls_v8_ig1":                   "CIS Controls v8 IG1",
-    "cis_v120":                              "CIS v1.2.0",
-    "cis_v130":                              "CIS v1.3.0",
-    "cis_v140":                              "CIS v1.4.0",
-    "cis_v150":                              "CIS v1.5.0",
-    "cis_v200":                              "CIS v2.0.0",
-    "cis_v300":                              "CIS v3.0.0",
-    "cis_v400":                              "CIS v4.0.0",
-    "cisa_cyber_essentials":                 "CISA Cyber Essentials",
-    "fedramp_low_rev_4":                     "FedRAMP Low Rev 4",
-    "fedramp_moderate_rev_4":                "FedRAMP Moderate Rev 4",
-    "ffiec":                                 "FFIEC",
-    "gdpr":                                  "GDPR",
-    "gxp_21_cfr_part_11":                   "GxP 21 CFR Part 11",
-    "gxp_eu_annex_11":                      "GxP EU Annex 11",
-    "hipaa_final_omnibus_security_rule_2013":"HIPAA Final Omnibus 2013",
-    "hipaa_security_rule_2003":              "HIPAA Security Rule 2003",
-    "nist_800_171_rev_2":                   "NIST 800-171 Rev 2",
-    "nist_800_53_rev_4":                    "NIST 800-53 Rev 4",
-    "nist_800_53_rev_5":                    "NIST 800-53 Rev 5",
-    "nist_csf":                             "NIST CSF v1.1",
-    "nist_csf_v2":                          "NIST CSF v2.0",
-    "nydfs_23":                             "NYDFS 23 NYCRR 500",
-    "nydfs_23_common_tags":                 "NYDFS 23 (Common)",
-    "pci_dss_v321":                         "PCI DSS v3.2.1",
-    "pci_dss_v40":                          "PCI DSS v4.0",
-    "rbi_cyber_security":                   "RBI Cyber Security",
-    "rbi_itf_nbfc":                         "RBI ITF NBFC",
-    "soc_2":                                "SOC 2",
-}
 
-
-def extract_service_groups(data: dict) -> list[dict]:
-    """Return service-level group titles and ordering from the JSON tree.
-    Actual summary counts are recomputed from deduped controls in generate_html()."""
+def extract_category_groups(data: dict) -> list[dict]:
+    """Return the sub-group (category) titles directly under the benchmark root."""
     try:
         return [{"title": g.get("title", "")} for g in data["groups"][0]["groups"]]
     except (KeyError, IndexError):
         return []
 
 
-def compute_service_summaries(service_titles: list[dict], controls: list[dict]) -> list[dict]:
-    """Build service summaries recomputed from the already-deduped control list."""
-    from collections import defaultdict
-    svc_alarm  = defaultdict(int)
-    svc_ok     = defaultdict(int)
-    svc_error  = defaultdict(int)
-    svc_info   = defaultdict(int)
-    svc_skip   = defaultdict(int)
-
-    for c in controls:
-        s = c["service"]
-        svc_alarm[s]  += c["alarm"]
-        svc_ok[s]     += c["ok"]
-        svc_error[s]  += c["error"]
-        svc_info[s]   += c["info"]
-        svc_skip[s]   += c["skip"]
-
-    services = []
-    for entry in service_titles:
-        n     = entry["title"]
-        alarm = svc_alarm[n]
-        ok    = svc_ok[n]
-        error = svc_error[n]
-        info  = svc_info[n]
-        skip  = svc_skip[n]
-        total = alarm + ok + error + info + skip
-        pass_pct = round((ok / total) * 100) if total > 0 else None
-
-        if error > 0:
-            status = "error"
-        elif alarm > 0:
-            status = "alarm"
-        elif ok > 0:
-            status = "ok"
-        elif info > 0:
-            status = "info"
-        else:
-            status = "skip"
-
-        services.append({
-            "title":    n,
-            "status":   status,
-            "alarm":    alarm,
-            "ok":       ok,
-            "error":    error,
-            "info":     info,
-            "skip":     skip,
-            "total":    total,
-            "pass_pct": pass_pct,
-        })
-    return services
-
-
-def extract_controls(data: dict) -> list[dict]:
-    """Flatten all controls from the benchmark tree into a single list."""
-    controls: list[dict] = []
-    # Service groups sit at depth 2 — directly under data['groups'][0]['groups']
-    try:
-        service_groups = data["groups"][0]["groups"]
-    except (KeyError, IndexError):
-        return controls
-    for group in service_groups:
-        _walk(group, service=group.get("title", "Unknown"), controls=controls)
-    return controls
-
-
 def _arn_account(resource: str) -> str:
     """Extract the account ID embedded in an AWS ARN, or empty string if not present."""
-    # ARN format: arn:partition:service:region:account-id:resource
     parts = resource.split(":")
     if len(parts) >= 5 and parts[0] == "arn" and parts[4].isdigit() and len(parts[4]) == 12:
         return parts[4]
     return ""
 
 
-def _walk(node: dict, service: str, controls: list) -> None:
+def _walk(node: dict, service: str, category: str, controls: list) -> None:
+    """Recursively walk a benchmark node, collecting and deduplicating controls."""
     for ctrl in (node.get("controls") or []):
         ctrl_svc = (ctrl.get("tags") or {}).get("service", service or "Unknown")
-        severity = ctrl.get("severity") or ""
 
-        # Deduplicate result rows by (resource, status) within this control.
-        # The same resource can appear once per compliance framework it belongs
-        # to, or once per member account that sees a shared payer-account resource.
-        # Deduplication produces one row per unique resource outcome.
-        #
-        # Attribution rule: if the account ID embedded in the resource ARN
-        # differs from the dimension account_id, the resource originates in the
-        # ARN account (e.g. a payer-account CloudTrail seen by a member account).
-        # In that case we rewrite the account_id dimension to the ARN account so
-        # the finding is attributed to the account that owns the resource.
+        # Deduplicate result rows by (resource, status).
+        # Attribute findings to the account owning the resource ARN when it
+        # differs from the querying connection's account dimension.
         raw_results = ctrl.get("results") or []
         seen_keys: set = set()
         results: list = []
         for r in raw_results:
             dims = r.get("dimensions") or []
-            region     = next((d["value"] for d in dims if d.get("key") == "region"),     "")
+            region      = next((d["value"] for d in dims if d.get("key") == "region"),     "")
             dim_account = next((d["value"] for d in dims if d.get("key") == "account_id"), "")
             key = (r.get("resource", ""), r.get("status", ""), region, dim_account)
             if key not in seen_keys:
                 seen_keys.add(key)
                 arn_account = _arn_account(r.get("resource", ""))
-                # If the resource belongs to a different account than the querying
-                # account, attribute it to the resource owner (ARN account).
                 if arn_account and arn_account != dim_account:
                     new_dims = [
                         {"key": d["key"], "value": arn_account}
@@ -209,14 +96,12 @@ def _walk(node: dict, service: str, controls: list) -> None:
                         else d
                         for d in dims
                     ]
-                    # If no account_id dimension existed, add one
                     if not any(d.get("key") == "account_id" for d in dims):
                         new_dims = list(dims) + [{"key": "account_id", "value": arn_account}]
                     r = dict(r, dimensions=new_dims)
                 results.append(r)
 
-        # Recompute summary counts from the deduped result rows so that all
-        # figures (table, charts, summaries) reflect deduplicated reality.
+        # Recompute counts from deduped rows; fall back to JSON summary when empty.
         alarm = sum(1 for r in results if r.get("status") == "alarm")
         ok    = sum(1 for r in results if r.get("status") == "ok")
         error = sum(1 for r in results if r.get("status") == "error")
@@ -224,8 +109,6 @@ def _walk(node: dict, service: str, controls: list) -> None:
         skip  = sum(1 for r in results if r.get("status") == "skip")
         total = alarm + ok + error + info + skip
 
-        # Fall back to the JSON summary when there are no result rows
-        # (controls that ran but produced no individual rows).
         if total == 0:
             summary = ctrl.get("summary") or {}
             alarm = summary.get("alarm", 0)
@@ -262,34 +145,92 @@ def _walk(node: dict, service: str, controls: list) -> None:
             if d.get("key") == "region" and d.get("value")
         ))
 
-        compliance_programs = sorted(
-            k for k, v in (ctrl.get("tags") or {}).items()
-            if k not in _META_TAGS and v == "true"
-        )
-
         controls.append({
-            "id":                  ctrl.get("control_id", ""),
-            "title":               ctrl.get("title", ""),
-            "description":         ctrl.get("description", ""),
-            "service":             service,
-            "ctrl_service":        ctrl_svc,
-            "severity":            severity,
-            "status":              ctrl_status,
-            "alarm":               alarm,
-            "ok":                  ok,
-            "error":               error,
-            "info":                info,
-            "skip":                skip,
-            "total":               total,
-            "pass_pct":            pass_pct,
-            "results":             results,
-            "account_ids":         account_ids,
-            "regions":             regions,
-            "compliance_programs": compliance_programs,
+            "id":          ctrl.get("control_id", ""),
+            "title":       ctrl.get("title", ""),
+            "description": ctrl.get("description", ""),
+            "service":     ctrl_svc,
+            "category":    category,
+            "status":      ctrl_status,
+            "alarm":       alarm,
+            "ok":          ok,
+            "error":       error,
+            "info":        info,
+            "skip":        skip,
+            "total":       total,
+            "pass_pct":    pass_pct,
+            "results":     results,
+            "account_ids": account_ids,
+            "regions":     regions,
         })
 
-    for group in (node.get("groups") or []):
-        _walk(group, service, controls)
+    for subgroup in (node.get("groups") or []):
+        _walk(subgroup, service, category, controls)
+
+
+def extract_controls(data: dict) -> list[dict]:
+    """Flatten all controls from the benchmark tree into a single list."""
+    controls: list[dict] = []
+    try:
+        category_groups = data["groups"][0]["groups"]
+    except (KeyError, IndexError):
+        return controls
+    for group in category_groups:
+        cat = group.get("title", "Unknown")
+        svc = (group.get("tags") or {}).get("service", cat)
+        _walk(group, service=svc, category=cat, controls=controls)
+    return controls
+
+
+def compute_category_summaries(category_titles: list[dict], controls: list[dict]) -> list[dict]:
+    """Build per-category summaries from the already-deduped control list."""
+    from collections import defaultdict
+    cat_alarm = defaultdict(int)
+    cat_ok    = defaultdict(int)
+    cat_error = defaultdict(int)
+    cat_info  = defaultdict(int)
+    cat_skip  = defaultdict(int)
+
+    for c in controls:
+        cat = c["category"]
+        cat_alarm[cat] += c["alarm"]
+        cat_ok[cat]    += c["ok"]
+        cat_error[cat] += c["error"]
+        cat_info[cat]  += c["info"]
+        cat_skip[cat]  += c["skip"]
+
+    categories = []
+    for entry in category_titles:
+        n     = entry["title"]
+        alarm = cat_alarm[n]
+        ok    = cat_ok[n]
+        error = cat_error[n]
+        info  = cat_info[n]
+        skip  = cat_skip[n]
+        total = alarm + ok + error + info + skip
+
+        if error > 0:
+            status = "error"
+        elif alarm > 0:
+            status = "alarm"
+        elif ok > 0:
+            status = "ok"
+        elif info > 0:
+            status = "info"
+        else:
+            status = "skip"
+
+        categories.append({
+            "title":  n,
+            "status": status,
+            "alarm":  alarm,
+            "ok":     ok,
+            "error":  error,
+            "info":   info,
+            "skip":   skip,
+            "total":  total,
+        })
+    return categories
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +242,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>{title} — Audit Report</title>
+<title>{title} — Perimeter Report</title>
 <style>
 *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
 :root{{
@@ -364,7 +305,7 @@ details.insights-open .insights-toggle{{border-bottom-left-radius:0;border-botto
 .hbar-row{{display:flex;align-items:center;gap:10px;margin-bottom:7px;cursor:pointer;border-radius:4px;padding:2px 4px;transition:background .12s}}
 .hbar-row:hover{{background:rgba(79,156,249,.07)}}
 .hbar-row.active-bar{{background:rgba(79,156,249,.14);outline:1px solid var(--accent)}}
-.hbar-label{{font-size:.74rem;color:var(--text);width:130px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}}
+.hbar-label{{font-size:.74rem;color:var(--text);width:160px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}}
 .hbar-track{{flex:1;height:14px;background:var(--bg);border-radius:4px;overflow:hidden}}
 .hbar-fill{{height:100%;border-radius:4px;transition:width .35s ease}}
 .hbar-val{{font-size:.72rem;color:var(--muted);width:52px;text-align:left;flex-shrink:0}}
@@ -487,9 +428,9 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
   <div class="insights-body">
     <div class="charts-grid" id="charts-grid">
 
-      <!-- Chart 1: Top 10 Services by Alarm -->
+      <!-- Chart 1: Top Services by Alarm -->
       <div class="chart-card">
-        <div class="chart-title">Top Services by Alarm <span id="c1-count" style="color:var(--muted);font-weight:400;font-size:.7rem"></span></div>
+        <div class="chart-title">Top Services by Alarm</div>
         <div id="chart-top-alarm"></div>
       </div>
 
@@ -509,14 +450,14 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
         <div class="gauge-wrap">
           <svg id="chart-gauge" width="220" height="130" viewBox="0 0 220 130"></svg>
           <div class="gauge-label" id="gauge-label"></div>
-          <div class="gauge-sub">controls passing</div>
+          <div class="gauge-sub">results passing</div>
         </div>
       </div>
 
-      <!-- Chart 4: Top 10 Compliance Programs by Fail Rate -->
+      <!-- Chart 4: Alarms by Category -->
       <div class="chart-card">
-        <div class="chart-title">Compliance Programs by Fail Rate</div>
-        <div id="chart-prog-fail"></div>
+        <div class="chart-title">Alarms by Category</div>
+        <div id="chart-cat-alarm"></div>
       </div>
 
       <!-- Chart 5: Pass Rate by Account -->
@@ -548,17 +489,17 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
     </select>
   </div>
   <div class="filter-group">
+    <label>Category</label>
+    <select id="f-category">
+      <option value="">All categories</option>
+      {category_options}
+    </select>
+  </div>
+  <div class="filter-group">
     <label>Service</label>
     <select id="f-service">
       <option value="">All services</option>
       {service_options}
-    </select>
-  </div>
-  <div class="filter-group">
-    <label>Compliance Program</label>
-    <select id="f-program">
-      <option value="">All programs</option>
-      {program_options}
     </select>
   </div>
   <div class="filter-group">
@@ -596,9 +537,11 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
     <tr>
       <th data-col="status" class="sorted" data-dir="asc">Status <span class="sort-icon">↕</span></th>
       <th data-col="title">Control <span class="sort-icon">↕</span></th>
-      <th data-col="service">Service <span class="sort-icon">↕</span></th>
+      <th data-col="category">Category <span class="sort-icon">↕</span></th>
+      <th data-col="service" class="svc-col">Service <span class="sort-icon">↕</span></th>
       <th data-col="alarm">Alarm <span class="sort-icon">↕</span></th>
       <th data-col="ok">OK <span class="sort-icon">↕</span></th>
+      <th data-col="info">Info <span class="sort-icon">↕</span></th>
       <th data-col="pass_pct">Pass % <span class="sort-icon">↕</span></th>
     </tr>
   </thead>
@@ -609,7 +552,7 @@ footer{{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);colo
 <div class="pagination" id="pagination"></div>
 
 <footer>
-  <span>AWS Compliance — Audit Report</span>
+  <span>AWS Perimeter — Audit Report</span>
   <span>Steampipe &amp; Powerpipe</span>
 </footer>
 
@@ -623,11 +566,7 @@ let sortCol     = 'status';
 let sortDir     = 'asc';
 let currentPage = 1;
 let pageSize    = 25;
-let activeService = '';
 const STATUS_ORDER = {{alarm:0,error:1,ok:2,info:3,skip:4}};
-
-// ── Chart data (static baseline injected by Python) ──────────────────────
-const CHART_DATA = {chart_data_json};
 
 // ── Chart helpers ─────────────────────────────────────────────────────────
 function hBar(containerId, rows, colorFn, onClickFn) {{
@@ -689,20 +628,18 @@ function drawGauge(svgId, labelId, pct) {{
 
 // ── Live chart computation from current filtered set ──────────────────────
 function renderCharts(data) {{
-  // --- Chart 1: top services by alarm ---
-  const svcAlarm={{}}, svcOk={{}}, svcTotal={{}};
+  // Chart 1: top services by alarm
+  const svcAlarm={{}};
   data.forEach(c=>{{
     const s=c.service||'Unknown';
     svcAlarm[s]=(svcAlarm[s]||0)+c.alarm;
-    svcOk[s]   =(svcOk[s]   ||0)+c.ok;
-    svcTotal[s]=(svcTotal[s]||0)+c.total;
   }});
-  const topAlarm=Object.entries(svcAlarm).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  const topAlarm=Object.entries(svcAlarm).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,10);
   hBar('chart-top-alarm', topAlarm,
     (v,m)=>`hsl(${{Math.round((1-v/m)*30)}},80%,55%)`,
     'filterByService');
 
-  // --- Chart 2: donut from filtered result status counts ---
+  // Chart 2: donut from filtered result status counts
   let rAlarm=0,rOk=0,rError=0,rInfo=0,rSkip=0;
   data.forEach(c=>{{ rAlarm+=c.alarm; rOk+=c.ok; rError+=c.error; rInfo+=c.info; rSkip+=c.skip; }});
   drawDonut('chart-donut','donut-legend','donut-subtitle',[
@@ -713,30 +650,23 @@ function renderCharts(data) {{
     {{label:'skip', v:rSkip, color:'#475569'}},
   ]);
 
-  // --- Chart 3: gauge ---
+  // Chart 3: gauge (ok / (ok + alarm + error))
   const grand=rAlarm+rOk+rError+rInfo+rSkip;
   const pct=grand>0?Math.round(rOk/grand*100):0;
   drawGauge('chart-gauge','gauge-label',pct);
 
-  // --- Chart 4: compliance program fail rate ---
-  const progFail={{}}, progTotal={{}};
+  // Chart 4: alarms by category
+  const catAlarm={{}};
   data.forEach(c=>{{
-    (c.compliance_programs||[]).forEach(p=>{{
-      (c.results||[]).forEach(r=>{{
-        progTotal[p]=(progTotal[p]||0)+1;
-        if(r.status==='alarm'||r.status==='error') progFail[p]=(progFail[p]||0)+1;
-      }});
-    }});
+    const cat=c.category||'Unknown';
+    catAlarm[cat]=(catAlarm[cat]||0)+c.alarm;
   }});
-  const progRows=Object.entries(progTotal)
-    .filter(([,t])=>t>=5)
-    .map(([p,t])=>[ PROGRAM_NAMES[p]||p, Math.round((progFail[p]||0)/t*100) ])
-    .sort((a,b)=>b[1]-a[1]).slice(0,10);
-  hBar('chart-prog-fail', progRows,
-    (v)=>`hsl(${{Math.round((100-v)*0.4)}},75%,52%)`,
-    'filterByProgram');
+  const catRows=Object.entries(catAlarm).sort((a,b)=>b[1]-a[1]);
+  hBar('chart-cat-alarm', catRows,
+    (v,m)=>`hsl(${{Math.round((1-v/m)*30)}},75%,52%)`,
+    'filterByCategory');
 
-  // --- Chart 5: pass rate by account ---
+  // Chart 5: pass rate by account
   const acctOk={{}}, acctTotal={{}};
   data.forEach(c=>{{
     (c.results||[]).forEach(r=>{{
@@ -759,7 +689,6 @@ function renderCharts(data) {{
 function filterByService(name) {{
   const el=document.getElementById('f-service');
   el.value = el.value===name ? '' : name;
-  activeService=el.value;
   applyFilters();
 }}
 function filterByStatus(status) {{
@@ -767,11 +696,9 @@ function filterByStatus(status) {{
   el.value = el.value===status ? '' : status;
   applyFilters();
 }}
-function filterByProgram(name) {{
-  // Map display name back to key
-  const key=Object.entries(PROGRAM_NAMES).find(([,v])=>v===name)?.[0] || name;
-  const el=document.getElementById('f-program');
-  el.value = el.value===key ? '' : key;
+function filterByCategory(name) {{
+  const el=document.getElementById('f-category');
+  el.value = el.value===name ? '' : name;
   applyFilters();
 }}
 function filterByAccount(acct) {{
@@ -780,17 +707,12 @@ function filterByAccount(acct) {{
   applyFilters();
 }}
 
-// ── Program name map (mirrors Python PROGRAM_NAMES) ───────────────────────
-const PROGRAM_NAMES = {program_names_json};
-
 // ── Details open/close state ──────────────────────────────────────────────
 (function() {{
   const d=document.getElementById('insights-details');
   if(d && d.open) d.classList.add('insights-open');
   d.addEventListener('toggle',()=>d.classList.toggle('insights-open',d.open));
 }})();
-
-// ── Service filter (dropdown only) ────────────────────────────────────────
 
 // ── Sort ──────────────────────────────────────────────────────────────────
 document.querySelectorAll('th[data-col]').forEach(th => {{
@@ -807,34 +729,29 @@ document.querySelectorAll('th[data-col]').forEach(th => {{
 }});
 
 // ── Filters ───────────────────────────────────────────────────────────────
-['f-search','f-status','f-service','f-program','f-account','f-region','f-pagesize'].forEach(id => {{
+['f-search','f-status','f-category','f-service','f-account','f-region','f-pagesize'].forEach(id => {{
   const el = document.getElementById(id);
-  el.addEventListener(id === 'f-search' ? 'input' : 'change', () => {{
-    if (id === 'f-service') {{
-      activeService = el.value;
-    }}
-    applyFilters();
-  }});
+  el.addEventListener(id === 'f-search' ? 'input' : 'change', applyFilters);
 }});
 
 function applyFilters() {{
-  const search  = document.getElementById('f-search').value.toLowerCase().trim();
-  const status  = document.getElementById('f-status').value;
-  const service = document.getElementById('f-service').value;
-  const program = document.getElementById('f-program').value;
-  const account = document.getElementById('f-account').value;
-  const region  = document.getElementById('f-region').value;
+  const search   = document.getElementById('f-search').value.toLowerCase().trim();
+  const status   = document.getElementById('f-status').value;
+  const category = document.getElementById('f-category').value;
+  const service  = document.getElementById('f-service').value;
+  const account  = document.getElementById('f-account').value;
+  const region   = document.getElementById('f-region').value;
   pageSize = parseInt(document.getElementById('f-pagesize').value) || 0;
   currentPage = 1;
 
   filtered = CONTROLS.filter(c => {{
-    if (status  && c.status  !== status)                         return false;
-    if (service && c.service !== service)                        return false;
-    if (program && !c.compliance_programs.includes(program))     return false;
-    if (account && !c.account_ids.includes(account))             return false;
-    if (region  && !c.regions.includes(region))                  return false;
+    if (status   && c.status   !== status)            return false;
+    if (category && c.category !== category)          return false;
+    if (service  && c.service  !== service)           return false;
+    if (account  && !c.account_ids.includes(account)) return false;
+    if (region   && !c.regions.includes(region))      return false;
     if (search) {{
-      const hay = (c.title + ' ' + c.id + ' ' + c.description + ' ' + c.service).toLowerCase();
+      const hay = (c.title + ' ' + c.id + ' ' + c.description + ' ' + c.service + ' ' + c.category).toLowerCase();
       if (!hay.includes(search)) return false;
     }}
     return true;
@@ -844,15 +761,14 @@ function applyFilters() {{
 }}
 
 function resetFilters() {{
-  document.getElementById('f-search').value   = '';
-  document.getElementById('f-status').value   = '';
-  document.getElementById('f-service').value  = '';
-  document.getElementById('f-program').value  = '';
-  document.getElementById('f-account').value  = '';
-  document.getElementById('f-region').value   = '';
-  document.getElementById('f-pagesize').value = '25';
+  document.getElementById('f-search').value    = '';
+  document.getElementById('f-status').value    = '';
+  document.getElementById('f-category').value  = '';
+  document.getElementById('f-service').value   = '';
+  document.getElementById('f-account').value   = '';
+  document.getElementById('f-region').value    = '';
+  document.getElementById('f-pagesize').value  = '25';
   pageSize = 25;
-  activeService = '';
   filtered = [...CONTROLS];
   currentPage = 1;
   renderCharts(filtered);
@@ -901,9 +817,11 @@ function render() {{
         <div class="ctrl-title" onclick="toggleDetail(this)">${{esc(c.title)}}</div>
         <div class="ctrl-id">${{esc(c.id)}}</div>
       </td>
-      <td class="svc-cell">${{esc(c.service)}}</td>
+      <td class="svc-cell">${{esc(c.category)}}</td>
+      <td class="svc-cell svc-col">${{esc(c.service)}}</td>
       <td>${{c.alarm>0?`<span style="color:var(--alarm);font-weight:600">${{c.alarm}}</span>`:'<span style="color:var(--muted)">0</span>'}}</td>
       <td>${{c.ok>0?`<span style="color:var(--ok);font-weight:600">${{c.ok}}</span>`:'<span style="color:var(--muted)">0</span>'}}</td>
+      <td>${{c.info>0?`<span style="color:var(--info);font-weight:600">${{c.info}}</span>`:'<span style="color:var(--muted)">0</span>'}}</td>
       <td class="bar-cell">
         <span class="pct">${{pctStr}}</span>
         ${{pct!==null?`<div class="mini-bar"><div class="mini-bar-fill" style="width:${{barW}}%"></div></div>`:''}}
@@ -912,7 +830,7 @@ function render() {{
 
     const dr = document.createElement('tr');
     dr.className = 'detail-row hidden';
-    dr.innerHTML = `<td colspan="6"><div class="detail-inner">
+    dr.innerHTML = `<td colspan="8"><div class="detail-inner">
       <div class="detail-desc">${{esc(c.description)}}</div>
       <div class="detail-heading">Results (${{c.results.length}})</div>
       ${{buildResultsHtml(c)}}
@@ -992,118 +910,22 @@ def build_options(values: list) -> str:
     return "\n".join(f'<option value="{v}">{v}</option>' for v in sorted(values) if v)
 
 
-def build_chart_data(services: list[dict], controls: list[dict], root_summary: dict) -> dict:
-    """Compute all chart datasets from service summaries and controls."""
-    from collections import defaultdict
-
-    # Service-level aggregates (from service group summaries)
-    svc_alarm = defaultdict(int)
-    svc_ok    = defaultdict(int)
-    svc_total = defaultdict(int)
-    for svc in services:
-        n = svc["title"]
-        svc_alarm[n] = svc["alarm"]
-        svc_ok[n]    = svc["ok"]
-        svc_total[n] = svc["total"]
-
-    # Chart 1: top 10 services by alarm
-    top_alarm = sorted(svc_alarm.items(), key=lambda x: -x[1])[:10]
-
-    # Chart 3: overall pass rate
-    grand    = sum(root_summary.get(s, 0) for s in STATUS_ORDER)
-    pass_pct = round((root_summary.get("ok", 0) / grand) * 100) if grand else 0
-
-    # Chart 4: top 10 compliance programs by fail rate — computed from result rows
-    prog_alarm = defaultdict(int)
-    prog_total = defaultdict(int)
-    acct_alarm = defaultdict(int)
-    acct_ok    = defaultdict(int)
-    acct_total = defaultdict(int)
-
-    for ctrl in controls:
-        programs = ctrl.get("compliance_programs") or []
-        for r in (ctrl.get("results") or []):
-            dims   = {d["key"]: d["value"] for d in (r.get("dimensions") or [])}
-            acct   = dims.get("account_id", "")
-            status = r.get("status", "")
-            # Account stats
-            if acct and acct != "<nil>":
-                acct_total[acct] += 1
-                if status == "alarm":
-                    acct_alarm[acct] += 1
-                elif status == "ok":
-                    acct_ok[acct] += 1
-            # Program stats
-            for prog in programs:
-                prog_total[prog] += 1
-                if status in ("alarm", "error"):
-                    prog_alarm[prog] += 1
-
-    # Top 10 programs by fail rate (min 10 results to avoid noise)
-    prog_fail = sorted(
-        [
-            (PROGRAM_NAMES.get(p, p), round(prog_alarm[p] / prog_total[p] * 100))
-            for p in prog_total
-            if prog_total[p] >= 10
-        ],
-        key=lambda x: -x[1]
-    )[:10]
-
-    # Chart 5: worst pass rate by account
-    worst_acct = sorted(
-        [
-            (a, round(acct_ok[a] / acct_total[a] * 100))
-            for a in acct_total
-            if acct_total[a] > 0
-        ],
-        key=lambda x: x[1]
-    )[:12]
-
-    return {
-        "top_alarm":         top_alarm,
-        "prog_fail_rate":    prog_fail,
-        "worst_acct_pass":   worst_acct,
-        "total_alarm":       root_summary.get("alarm", 0),
-        "total_ok":          root_summary.get("ok", 0),
-        "total_error":       root_summary.get("error", 0),
-        "total_info":        root_summary.get("info", 0),
-        "total_skip":        root_summary.get("skip", 0),
-        "pass_pct":          pass_pct,
-    }
-
-
 def generate_html(data: dict, account_id: str) -> str:
-    # Extract service titles (for ordering) and deduped controls
-    service_titles = extract_service_groups(data)
-    controls       = extract_controls(data)
+    category_titles = extract_category_groups(data)
+    controls        = extract_controls(data)
 
-    # Recompute service summaries and root summary from deduped controls
-    services = compute_service_summaries(service_titles, controls)
-    deduped_alarm = sum(c["alarm"] for c in controls)
-    deduped_ok    = sum(c["ok"]    for c in controls)
-    deduped_error = sum(c["error"] for c in controls)
-    deduped_info  = sum(c["info"]  for c in controls)
-    deduped_skip  = sum(c["skip"]  for c in controls)
-    deduped_summary = {
-        "alarm": deduped_alarm,
-        "ok":    deduped_ok,
-        "error": deduped_error,
-        "info":  deduped_info,
-        "skip":  deduped_skip,
-    }
+    total_alarm = sum(c["alarm"] for c in controls)
+    total_ok    = sum(c["ok"]    for c in controls)
+    total_error = sum(c["error"] for c in controls)
+    total_info  = sum(c["info"]  for c in controls)
+    total_skip  = sum(c["skip"]  for c in controls)
 
-    service_names = [s["title"] for s in services]
-    account_ids   = sorted(set(a for c in controls for a in c["account_ids"]))
-    region_ids    = sorted(set(r for c in controls for r in c["regions"]))
-    program_keys  = sorted(set(p for c in controls for p in c["compliance_programs"]))
-    program_options = "\n".join(
-        f'<option value="{k}">{PROGRAM_NAMES.get(k, k)}</option>'
-        for k in program_keys
-    )
+    category_names = [cat["title"] for cat in category_titles]
+    service_names  = sorted(set(c["service"] for c in controls))
+    account_ids    = sorted(set(a for c in controls for a in c["account_ids"]))
+    region_ids     = sorted(set(r for c in controls for r in c["regions"]))
 
-    chart_data = build_chart_data(services, controls, deduped_summary)
-
-    title = data.get("groups", [{}])[0].get("title", "AWS Compliance")
+    title     = data.get("groups", [{}])[0].get("title", "AWS Perimeter")
     generated = datetime.now().strftime("%B %d, %Y at %H:%M")
 
     return HTML_TEMPLATE.format(
@@ -1111,19 +933,17 @@ def generate_html(data: dict, account_id: str) -> str:
         generated=generated,
         account_id=account_id,
         total_controls=len(controls),
-        total_alarm=deduped_alarm,
-        total_ok=deduped_ok,
-        total_error=deduped_error,
-        total_info=deduped_info,
-        total_skip=deduped_skip,
-        service_options="\n".join(
-            f'<option value="{s}">{s}</option>' for s in service_names
+        total_alarm=total_alarm,
+        total_ok=total_ok,
+        total_error=total_error,
+        total_info=total_info,
+        total_skip=total_skip,
+        category_options="\n".join(
+            f'<option value="{c}">{c}</option>' for c in category_names
         ),
-        program_options=program_options,
+        service_options=build_options(service_names),
         account_options=build_options(account_ids),
         region_options=build_options(region_ids),
-        chart_data_json=json.dumps(chart_data, separators=(",", ":")),
-        program_names_json=json.dumps(PROGRAM_NAMES, separators=(",", ":")),
         controls_json=json.dumps(controls, separators=(",", ":")),
     )
 
@@ -1143,7 +963,7 @@ def main() -> None:
     output_path = (
         Path(args.output).resolve()
         if args.output
-        else Path(__file__).parent / "reports" / "aws_compliance.html"
+        else Path(__file__).parent / "reports" / "aws_perimeter.html"
     )
 
     LOGGER.info("Reading %s...", input_path.name)
