@@ -24,9 +24,9 @@ Your AWS credentials (SSO session)
        └─ Write ~/.steampipe/config/aws.spc
             └─ One connection block per account + aws_all aggregator
                  └─ Start Steampipe service
-                      └─ Run Powerpipe benchmark
-                           └─ Export JSON + HTML to results/
-                                └─ Optionally launch Powerpipe dashboard
+                       └─ Run Powerpipe benchmark
+                            └─ Export JSON + HTML to results/
+                                 └─ Auto-generate custom HTML report
 ```
 
 ### Key design decisions
@@ -264,7 +264,6 @@ results/
     <payer_account_id>_<mod_id>_<timestamp>.html
     <payer_account_id>_<mod_id>_<timestamp>.log
     <payer_account_id>_<mod_id>_<timestamp>_report.html  ← custom report (supported mods)
-    <payer_account_id>_<mod_id>_dashboard.log            ← only if dashboard launched
 ```
 
 JSON and HTML outputs are only written for mods that support them
@@ -289,41 +288,10 @@ result rows. No server or internet connection is required to view them.
 
 ---
 
-## Powerpipe Dashboard
-
-After a benchmark completes, the tool prompts to launch the Powerpipe
-dashboard server. Benchmarks are served as interactive pages — you can
-run, filter, and explore results in the browser without re-running the
-benchmark.
-
-```
-Launch Powerpipe dashboard for AWS Compliance? [y/N]:
-```
-
-If you choose yes:
-
-```
-  ==================================================
-  Dashboard ready — open your browser and visit:
-
-    http://localhost:9033
-
-  Server logs: results/.../dashboard.log
-  The server will be stopped when you exit the tool.
-  ==================================================
-```
-
-The server runs in the background. You can continue running
-additional mods while the dashboard is open. Only one dashboard
-server runs at a time — launching a new one stops the previous.
-
----
-
 ## Cleanup
 
 On exit the tool automatically:
 
-- Stops the Powerpipe dashboard server (if running)
 - Stops the Steampipe service
 - Overwrites `~/.steampipe/config/aws.spc` with a timestamp comment
   (clears all temporary credentials from disk)
@@ -349,7 +317,6 @@ To add a new mod:
   ],
   "supports_html": true,
   "supports_json": true,
-  "supports_dashboard": true,
   "report_script": "generate_my_mod_report.py"
 }
 ```

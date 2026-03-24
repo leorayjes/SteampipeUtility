@@ -9,9 +9,8 @@
 #   5. Presents a mod selector and runs the chosen Powerpipe benchmark.
 #   6. Saves results (JSON + HTML where supported) to ./results/.
 #   7. Auto-generates a custom HTML report where a report_script is configured.
-#   8. Optionally launches the Powerpipe dashboard server.
-#   9. Prompts to run another mod or exit.
-#  10. Cleans up the virtual environment on exit.
+#   8. Prompts to run another mod or exit.
+#   9. Cleans up the virtual environment on exit.
 
 set -euo pipefail
 
@@ -20,8 +19,6 @@ MODS_CONFIG="mods.json"
 RESULTS_DIR="results"
 CONNECTION_SCRIPT="generate_steampipe_connections.py"
 DEFAULT_ROLE_NAME="AWS_HEALTHCHECK_COLLECTOR"
-POWERPIPE_SERVER_PID=""
-DASHBOARD_MOD_DIR=""
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -138,19 +135,6 @@ prompt_required() {
 
 cleanup() {
     echo
-
-    # Stop Powerpipe dashboard server if it's still running.
-    if [[ -n "$POWERPIPE_SERVER_PID" ]] && kill -0 "$POWERPIPE_SERVER_PID" 2>/dev/null; then
-        log "Stopping Powerpipe dashboard server (PID $POWERPIPE_SERVER_PID)..."
-        kill "$POWERPIPE_SERVER_PID" 2>/dev/null || true
-        wait "$POWERPIPE_SERVER_PID" 2>/dev/null || true
-        log "Dashboard server stopped."
-    fi
-
-    # Clean up the mod working directory kept alive for the dashboard server.
-    if [[ -n "$DASHBOARD_MOD_DIR" ]] && [[ -d "$DASHBOARD_MOD_DIR" ]]; then
-        rm -rf "$DASHBOARD_MOD_DIR"
-    fi
 
     # Stop Steampipe service on exit.
     if steampipe service status 2>/dev/null | grep -q "service is running"; then
@@ -332,15 +316,6 @@ for m in c['mods']:
     print(str(m.get('supports_json', False)).lower())
 ")
 
-MOD_DASHBOARD=()
-while IFS= read -r line; do MOD_DASHBOARD+=("$line"); done < <(python3 -c "
-import json
-with open('$MODS_CONFIG') as f:
-    c = json.load(f)
-for m in c['mods']:
-    print(str(m.get('supports_dashboard', False)).lower())
-")
-
 # Powerpipe mod namespaces
 MOD_NAMESPACES=()
 while IFS= read -r line; do MOD_NAMESPACES+=("$line"); done < <(python3 -c "
@@ -440,7 +415,6 @@ run_mod() {
     local benchmark="${mod_namespace}.benchmark.${SELECTED_BENCHMARK_ID}"
     local supports_html="${MOD_HTML[$index]}"
     local supports_json="${MOD_JSON[$index]}"
-    local supports_dashboard="${MOD_DASHBOARD[$index]}"
     local timestamp
     timestamp=$(date +"%Y%m%d_%H%M")
     # Each run gets its own subdirectory: results/<payer_account_id>_<mod_id>_<timestamp>/
@@ -459,18 +433,6 @@ run_mod() {
     # Install the mod.
     log "Installing mod: $mod_path"
     (cd "$mod_work_dir" && powerpipe mod install "$mod_path")
-
-    # Resolve the installed mod's own directory.
-    # powerpipe mod install unpacks the mod under:
-    #   $mod_work_dir/.powerpipe/mods/<github-path>@<version>/
-    # powerpipe server must be run from that directory — not the wrapper — so
-    # that it can discover and serve the mod's benchmarks as interactive pages.
-    local installed_mod_dir
-    installed_mod_dir=$(find "$mod_work_dir/.powerpipe/mods" -name "mod.pp" 2>/dev/null | head -1 | xargs -I{} dirname {})
-    if [[ -z "$installed_mod_dir" ]]; then
-        warn "Could not locate installed mod directory — falling back to wrapper dir."
-        installed_mod_dir="$mod_work_dir"
-    fi
 
     # Run benchmark and export results.
     log "Running benchmark..."
@@ -529,60 +491,7 @@ run_mod() {
         fi
     fi
 
-    # Optionally launch the Powerpipe dashboard server.
-    # Benchmarks appear as interactive dashboard pages when powerpipe server
-    # is run from the installed mod's own directory.
-    # mod_work_dir is kept alive while the server is running so the mod files
-    # remain on disk; cleanup() removes it when the server is stopped.
-    if [[ "$supports_dashboard" == "true" ]]; then
-        echo
-        read -rp "Launch Powerpipe dashboard for $mod_name? [y/N]: " launch_dashboard
-        case "$launch_dashboard" in
-            [yY][eE][sS]|[yY])
-                # Stop any previously running server first.
-                if [[ -n "$POWERPIPE_SERVER_PID" ]] && kill -0 "$POWERPIPE_SERVER_PID" 2>/dev/null; then
-                    log "Stopping previous dashboard server (PID $POWERPIPE_SERVER_PID)..."
-                    kill "$POWERPIPE_SERVER_PID" 2>/dev/null || true
-                    wait "$POWERPIPE_SERVER_PID" 2>/dev/null || true
-                    if [[ -n "$DASHBOARD_MOD_DIR" ]] && [[ -d "$DASHBOARD_MOD_DIR" ]]; then
-                        rm -rf "$DASHBOARD_MOD_DIR"
-                    fi
-                fi
-
-                local dashboard_log="${run_dir}/${PAYER_ACCOUNT_ID}_${mod_id}_dashboard.log"
-
-                log "Starting Powerpipe dashboard server..."
-                # Run from the installed mod's own directory so benchmarks are visible.
-                # Redirect all server output to a log file to keep this terminal clean.
-                (cd "$installed_mod_dir" && powerpipe server \
-                    --pipes-host localhost \
-                    > "$dashboard_log" 2>&1) &
-                POWERPIPE_SERVER_PID=$!
-                # Save the top-level work dir so cleanup() can remove the full
-                # .powerpipe/ tree (including the installed mod) when the server stops.
-                DASHBOARD_MOD_DIR="$mod_work_dir"
-
-                echo
-                echo "  =================================================="
-                echo "  Dashboard ready — open your browser and visit:"
-                echo ""
-                echo "    http://localhost:9033"
-                echo ""
-                echo "  Server logs: $dashboard_log"
-                echo "  The server will be stopped when you exit the tool."
-                echo "  =================================================="
-                echo
-
-                # Do NOT delete mod_work_dir here — the server needs it.
-                return
-                ;;
-            *)
-                log "Dashboard not launched."
-                ;;
-        esac
-    fi
-
-    # Clean up temp mod directory (only reached if dashboard was not launched).
+    # Clean up temp mod directory.
     rm -rf "$mod_work_dir"
 }
 
