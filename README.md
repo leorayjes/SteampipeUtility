@@ -292,7 +292,9 @@ result rows. No server or internet connection is required to view them.
 ## Powerpipe Dashboard
 
 After a benchmark completes, the tool prompts to launch the Powerpipe
-dashboard server:
+dashboard server. Benchmarks are served as interactive pages — you can
+run, filter, and explore results in the browser without re-running the
+benchmark.
 
 ```
 Launch Powerpipe dashboard for AWS Compliance? [y/N]:
