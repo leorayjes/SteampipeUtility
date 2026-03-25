@@ -411,8 +411,6 @@ run_mod() {
     local mod_path="${MOD_PATHS[$index]}"
     local mod_namespace="${MOD_NAMESPACES[$index]}"
     local report_script="${MOD_REPORT_SCRIPTS[$index]}"
-    # Construct the fully-qualified benchmark name using the powerpipe namespace.
-    local benchmark="${mod_namespace}.benchmark.${SELECTED_BENCHMARK_ID}"
     local supports_html="${MOD_HTML[$index]}"
     local supports_json="${MOD_JSON[$index]}"
     local timestamp
@@ -421,7 +419,6 @@ run_mod() {
     local run_dir
     run_dir="$(pwd)/$RESULTS_DIR/${PAYER_ACCOUNT_ID}_${mod_id}_${timestamp}"
     mkdir -p "$run_dir"
-    local output_base="${run_dir}/${PAYER_ACCOUNT_ID}_${mod_id}_${timestamp}"
 
     section "Running: $mod_name"
 
@@ -430,55 +427,140 @@ run_mod() {
     mod_work_dir=$(mktemp -d)
     log "Working directory: $mod_work_dir"
 
-    # Install the mod.
+    # Install the mod once (shared across all benchmarks in this run).
     log "Installing mod: $mod_path"
     (cd "$mod_work_dir" && powerpipe mod install "$mod_path")
 
-    # Run benchmark and export results.
-    log "Running benchmark..."
+    if [[ "$SELECTED_BENCHMARK_ID" == "all" ]]; then
+        # -----------------------------------------------------------------------
+        # "All Checks" mode: load every non-sentinel benchmark from mods.json and
+        # run them sequentially, writing individual output files into run_dir.
+        # -----------------------------------------------------------------------
+        local all_bench_ids=()
+        local all_bench_names=()
+        while IFS='|' read -r bid bname; do
+            [[ "$bid" == "all" ]] && continue   # skip the sentinel itself
+            all_bench_ids+=("$bid")
+            all_bench_names+=("$bname")
+        done < <(python3 -c "
+import json
+with open('$MODS_CONFIG') as f:
+    c = json.load(f)
+mod = next(m for m in c['mods'] if m['id'] == '$mod_id')
+for b in mod['benchmarks']:
+    print(b['id'] + '|' + b['name'])
+")
 
-    local export_args=()
+        log "Running all ${#all_bench_ids[@]} benchmarks..."
+        local overall_exit=0
+        local i
+        for i in "${!all_bench_ids[@]}"; do
+            local bench_id="${all_bench_ids[$i]}"
+            local bench_name="${all_bench_names[$i]}"
+            local benchmark="${mod_namespace}.benchmark.${bench_id}"
+            local output_base="${run_dir}/${PAYER_ACCOUNT_ID}_${mod_id}_${bench_id}_${timestamp}"
 
-    if [[ "$supports_json" == "true" ]]; then
-        export_args+=("--export" "${output_base}.json")
-        log "JSON output: ${output_base}.json"
-    fi
+            log "[$((i+1))/${#all_bench_ids[@]}] $bench_name"
 
-    if [[ "$supports_html" == "true" ]]; then
-        export_args+=("--export" "${output_base}.html")
-        log "HTML output: ${output_base}.html"
-    fi
+            local export_args=()
+            if [[ "$supports_json" == "true" ]]; then
+                export_args+=("--export" "${output_base}.json")
+            fi
+            if [[ "$supports_html" == "true" ]]; then
+                export_args+=("--export" "${output_base}.html")
+            fi
 
-    local benchmark_exit=0
-    pushd "$mod_work_dir" > /dev/null
-    # Temporarily disable set -e so powerpipe's non-zero exit on findings
-    # (alarms/errors) does not abort the script before we can read the exit code.
-    set +e
-    powerpipe benchmark run "$benchmark" \
-        --pipes-host localhost \
-        --search-path aws_all \
-        "${export_args[@]}" \
-        2>&1 | tee "${output_base}.log"
-    benchmark_exit=${PIPESTATUS[0]}
-    set -e
-    popd > /dev/null
-
-    if (( benchmark_exit == 0 )); then
-        log "Benchmark complete — no alarms or errors found."
-    else
-        log "Benchmark complete — findings were reported (exit code: $benchmark_exit)."
-    fi
-    log "Results saved to $run_dir/"
-
-    # If a report script is configured for this mod and a JSON export was produced,
-    # automatically generate the custom HTML report.
-    if [[ -n "$report_script" && "$supports_json" == "true" ]]; then
-        local json_file="${output_base}.json"
-        local report_file="${output_base}_report.html"
-        if [[ -f "$json_file" ]]; then
-            log "Generating report: $report_script ..."
+            local bench_exit=0
+            pushd "$mod_work_dir" > /dev/null
             set +e
-            python "$report_script" "$json_file" --output "$report_file"
+            powerpipe benchmark run "$benchmark" \
+                --pipes-host localhost \
+                --search-path aws_all \
+                "${export_args[@]}" \
+                2>&1 | tee "${output_base}.log"
+            bench_exit=${PIPESTATUS[0]}
+            set -e
+            popd > /dev/null
+
+            if (( bench_exit != 0 )); then
+                overall_exit=$bench_exit
+            fi
+        done
+
+        log "All benchmarks complete. Results saved to $run_dir/"
+        if (( overall_exit == 0 )); then
+            log "No alarms or errors found across any benchmark."
+        else
+            log "Findings were reported in one or more benchmarks."
+        fi
+
+        # Produce an aggregated JSON that merges all per-service benchmark files
+        # into a single root object with one group per service.
+        local aggregated_json=""
+        if [[ "$supports_json" == "true" ]]; then
+            aggregated_json="${run_dir}/${PAYER_ACCOUNT_ID}_${mod_id}_all_${timestamp}.json"
+            log "Producing aggregated JSON: $aggregated_json ..."
+            set +e
+            python3 -c "
+import json, glob, sys, os
+
+run_dir = '$run_dir'
+out_path = '$aggregated_json'
+
+# Collect every per-service JSON (exclude any previously-written aggregated file).
+pattern = os.path.join(run_dir, '*.json')
+files = sorted(f for f in glob.glob(pattern) if '_all_' not in os.path.basename(f))
+
+if not files:
+    print('No JSON files found to aggregate.', file=sys.stderr)
+    sys.exit(1)
+
+groups = []
+total = {'alarm': 0, 'ok': 0, 'info': 0, 'skip': 0, 'error': 0}
+
+for fpath in files:
+    with open(fpath) as f:
+        data = json.load(f)
+    # Each file has groups[0] as the real benchmark group.
+    sub_groups = data.get('groups') or []
+    if not sub_groups:
+        continue
+    groups.append(sub_groups[0])
+    svc_status = (data.get('summary') or {}).get('status') or {}
+    for k in total:
+        total[k] += svc_status.get(k, 0)
+
+aggregated = {
+    'group_id': 'root_result_group',
+    'title': 'AWS Thrifty — All Checks',
+    'description': 'Aggregated results from all AWS Thrifty service benchmarks.',
+    'tags': {},
+    'summary': {'status': total},
+    'groups': groups,
+    'controls': [],
+}
+
+with open(out_path, 'w') as f:
+    json.dump(aggregated, f, separators=(',', ':'))
+
+print(f'Aggregated {len(groups)} service groups into {out_path}')
+"
+            local agg_exit=$?
+            set -e
+            if (( agg_exit != 0 )); then
+                warn "Aggregated JSON generation failed — skipping report generation."
+                aggregated_json=""
+            else
+                log "Aggregated JSON: $aggregated_json"
+            fi
+        fi
+
+        # Generate a unified report from the aggregated JSON.
+        if [[ -n "$report_script" && -n "$aggregated_json" && -f "$aggregated_json" ]]; then
+            local report_file="${run_dir}/${PAYER_ACCOUNT_ID}_${mod_id}_${timestamp}_report.html"
+            log "Generating unified report: $report_script ..."
+            set +e
+            python "$report_script" "$aggregated_json" --output "$report_file"
             local report_exit=$?
             set -e
             if (( report_exit == 0 )); then
@@ -486,8 +568,69 @@ run_mod() {
             else
                 warn "Report generation failed (exit code: $report_exit). The raw JSON/HTML exports are still available."
             fi
+        fi
+
+    else
+        # -----------------------------------------------------------------------
+        # Single-benchmark mode (original behaviour).
+        # -----------------------------------------------------------------------
+        local benchmark="${mod_namespace}.benchmark.${SELECTED_BENCHMARK_ID}"
+        local output_base="${run_dir}/${PAYER_ACCOUNT_ID}_${mod_id}_${timestamp}"
+
+        log "Running benchmark..."
+
+        local export_args=()
+
+        if [[ "$supports_json" == "true" ]]; then
+            export_args+=("--export" "${output_base}.json")
+            log "JSON output: ${output_base}.json"
+        fi
+
+        if [[ "$supports_html" == "true" ]]; then
+            export_args+=("--export" "${output_base}.html")
+            log "HTML output: ${output_base}.html"
+        fi
+
+        local benchmark_exit=0
+        pushd "$mod_work_dir" > /dev/null
+        # Temporarily disable set -e so powerpipe's non-zero exit on findings
+        # (alarms/errors) does not abort the script before we can read the exit code.
+        set +e
+        powerpipe benchmark run "$benchmark" \
+            --pipes-host localhost \
+            --search-path aws_all \
+            "${export_args[@]}" \
+            2>&1 | tee "${output_base}.log"
+        benchmark_exit=${PIPESTATUS[0]}
+        set -e
+        popd > /dev/null
+
+        if (( benchmark_exit == 0 )); then
+            log "Benchmark complete — no alarms or errors found."
         else
-            warn "Expected JSON export not found at $json_file — skipping report generation."
+            log "Benchmark complete — findings were reported (exit code: $benchmark_exit)."
+        fi
+        log "Results saved to $run_dir/"
+
+        # If a report script is configured for this mod and a JSON export was produced,
+        # automatically generate the custom HTML report.
+        if [[ -n "$report_script" && "$supports_json" == "true" ]]; then
+            local json_file="${output_base}.json"
+            local report_file="${output_base}_report.html"
+            if [[ -f "$json_file" ]]; then
+                log "Generating report: $report_script ..."
+                set +e
+                python "$report_script" "$json_file" --output "$report_file"
+                local report_exit=$?
+                set -e
+                if (( report_exit == 0 )); then
+                    log "Report generated: $report_file"
+                else
+                    warn "Report generation failed (exit code: $report_exit). The raw JSON/HTML exports are still available."
+                fi
+            else
+                warn "Expected JSON export not found at $json_file — skipping report generation."
+            fi
         fi
     fi
 
